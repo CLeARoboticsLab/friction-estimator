@@ -1,0 +1,29 @@
+<mujoco>
+
+  <option iterations="50" />
+  <custom>
+      <!-- brax custom params -->
+      <numeric data="0" name="matrix_inv_iterations"/>
+      <numeric data="20" name="solver_maxls"/>
+  </custom>
+
+  <default>
+      <geom contype="0" conaffinity="0" />
+  </default>
+
+  <worldbody>
+    <geom name="base" pos="0 0 0" euler="0 0 0" size="0.1" type="sphere"/>
+
+    <body name="link1" pos="0 0 0.5">
+      <inertial pos="0 0 0" euler="0 0 0" mass="1.0" diaginertia="0.083958 0.083958 0.00125" />
+      <joint axis="1 0 0" name="joint1" pos="0 0 -0.5" type="hinge"/>
+      <geom name="clink1" size="0.05 0.5" type="capsule"/>
+    </body>
+
+  </worldbody>
+
+  <actuator>
+    <motor gear="1" joint="joint1" name="torque1"/>
+  </actuator>
+
+</mujoco>
