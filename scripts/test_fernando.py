@@ -1,4 +1,4 @@
-from brax.envs.single_pendulum import SinglePendulum
+from brax.envs.panda import Panda
 import jax
 
 # You can try this to cache jitting functions
@@ -11,21 +11,21 @@ from jax import numpy as jp
 
 
 seed = 0
-env = SinglePendulum()
+env = Panda()
 env_reset_jitted = jax.jit(env.reset)
 env_step_jitted = jax.jit(env.step)
 init_state = env_reset_jitted(jax.random.PRNGKey(seed))
 
 
-def reward(action):
-    new_state = env_step_jitted(init_state, action)
-    return new_state.reward
+# def reward(action):
+#     new_state = env_step_jitted(init_state, action)
+#     return new_state.reward
 
 
-action = jp.array([0.1])
-reward_gradient_fn = jax.grad(reward)
-grads = reward_gradient_fn(action)
-print(grads)
+# action = jp.array([0.1])
+# reward_gradient_fn = jax.grad(reward)
+# grads = reward_gradient_fn(action)
+# print(grads)
 
 
 # run this script with this command to render:
