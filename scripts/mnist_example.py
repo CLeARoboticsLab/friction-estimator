@@ -7,6 +7,7 @@ from torch.utils.data import DataLoader
 from torchvision.datasets import MNIST
 from torchvision import transforms
 import optax
+import time
 
 
 # Parameters 
@@ -31,13 +32,13 @@ def show_img(img, ax=None, title=None):
         ax.set_title(f"{title}")
 
 
-def show_img_grd(imgs, titles):
+def show_img_grd(imgs, titles, file_name='figures/grid.png'):
     """Shows a grid of images."""
     n = int(jnp.ceil(len(imgs)**0.5))
     _, axs = plt.subplots(n, n, figsize=(3*n, 3*n))
     for i, (img, title) in enumerate(zip(imgs, titles)):
         show_img(img, axs[i // n][i % n], title)
-    plt.savefig('figures/grid.png', dpi=300)
+    plt.savefig(file_name, dpi=300)
 
 
 # Define MLP 
@@ -54,6 +55,11 @@ class SimpleMLP(nn.Module):
             else:
                 x = nn.softmax(x)
         return x
+
+
+@jit
+def apply_model(params, inputs):
+    return model.apply(params, inputs)
 
 
 # Data loaders
@@ -98,14 +104,14 @@ def prepare_inputs(pytorch_tensor):
     return jax_array.reshape(jax_array.shape[0], -1)
 
 
-# Define loss
+# Define loss and jit it
 def make_loss(model: SimpleMLP):
     def batched_cross_entropy(params, inputs_batched, targets_batched):
         targets_one_hot = jnp.eye(10)[targets_batched]
         preds_batched = model.apply(params, inputs_batched)
         return -jnp.mean(jnp.sum(targets_one_hot * jnp.log(preds_batched + 1e-10), axis=1))
     
-    return batched_cross_entropy
+    return jit(batched_cross_entropy)
 
 
 loss_fn = make_loss(model)
@@ -124,16 +130,27 @@ tx = optax.adam(learning_rate=learning_rate)
 opt_state = tx.init(params)
 loss_grad_fn = value_and_grad(loss_fn)
 
-# Run training loop 
+
+@jit
+def update_step(params, opt_state, inputs, targets):
+    # loss_grad_fn should be defined outside since it involves `grad`
+    loss, grads = loss_grad_fn(params, inputs, targets)
+    updates, opt_state = tx.update(grads, opt_state)
+    new_params = optax.apply_updates(params, updates)
+    return new_params, opt_state, loss
+
+
+# Start time
+start_time = time.time()
+
+# Run training loop
 history_loss_train = []
 history_loss_test = []
 for i in range(n_epochs):
     for batch_idx, (inputs, targets) in enumerate(train_loader):
         inputs = prepare_inputs(inputs)
         targets = jnp.array(targets.numpy())
-        loss, grads = loss_grad_fn(params, inputs, targets)
-        updates, opt_state = tx.update(grads, opt_state)
-        params = optax.apply_updates(params, updates)
+        params, opt_state, loss = update_step(params, opt_state, inputs, targets)
         history_loss_train.append(loss)
         if batch_idx % log_interval == 0:
             print(f"Epoch {i}, Batch {batch_idx}, Training Loss: {loss}")
@@ -144,6 +161,10 @@ for i in range(n_epochs):
         loss = loss_fn(params, inputs, targets)
         print(f"Epoch {i}, Batch {batch_idx}, Validation Loss: {loss}")
         history_loss_test.append(loss)
+
+end_time = time.time()
+total_time = end_time - start_time
+print(f"Total training time: {total_time} seconds")
 
 # Plot loss history
 plt.plot(history_loss_train, label='train')
@@ -158,7 +179,7 @@ jax_example_batch = prepare_inputs(example_batch)
 jax_example_targets = jnp.array(example_targets.numpy())
 preds = model.apply(params, jax_example_batch)
 preds = jnp.argmax(preds, axis=1)
-print(f"Predictions: {preds}")
-print(f"True labels: {jax_example_targets}")
+print(f"Predictions: {preds[:9]}")
+print(f"True labels: {jax_example_targets[:9]}")
 
-show_img_grd(example_batch.squeeze(1)[:9], preds[:9].tolist())
+show_img_grd(example_batch.squeeze(1)[:9], preds[:9].tolist(), file_name='figures/predictions.png')
