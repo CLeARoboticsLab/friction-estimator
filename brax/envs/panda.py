@@ -10,12 +10,12 @@ class Panda(PipelineEnv):
 
     def __init__(self,
                  theta_des=jp.pi/4.0,
-                 action_scale=40.0,
+                 action_scale=1.0,
                  initial_theta_range=(-jp.pi, jp.pi),
                  initial_thetadot_range=(-0.1, 0.1),
                  backend='generalized', **kwargs):
 
-        # get the brax system for the single pendulum
+        # get the brax system for panda
         sys = PandaUtils.get_system()
 
         # set the time step duration for the physics pipeline
@@ -34,7 +34,7 @@ class Panda(PipelineEnv):
         self._action_scale = action_scale
 
     def reset(self, rng: jp.ndarray) -> State:
-        """Resets the environment to a randome initial state."""
+        """Resets the environment to a random initial state."""
         rng1, rng2 = jax.random.split(rng, 2)
 
         q = self.sys.init_q + jax.random.uniform(
@@ -53,8 +53,18 @@ class Panda(PipelineEnv):
         metrics = {}
 
         return State(pipeline_state, obs, reward, done, metrics)
+    
+    def set_state(self, q, qd) -> State:
+        """Sets the environment state to a specific state."""
+        pipeline_state = self.pipeline_init(q, qd)
+        obs = self._get_obs(pipeline_state)
+        reward, done = jp.zeros(2)
+        metrics = {}
+
+        return State(pipeline_state, obs, reward, done, metrics)
 
     def step(self, state: State, action: jp.ndarray) -> State:
+        """Steps the environment forward given an action. Action is a torque for every joint."""
 
         # get initial observation
         prev_obs = self._get_obs(state.pipeline_state)
