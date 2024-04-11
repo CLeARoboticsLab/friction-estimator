@@ -119,7 +119,8 @@ for step in range(num_steps):
     print(f"Action: {action}")
     print(f"Torque_o: {torques_osc}")    
     print(f"Torque_f: {torques_friction}")
-    print(f"New q_brax: {brax_new_state}")
+    print(f"New q_brax: {brax_new_state.pipeline_state.q}")
+    print(f"New qd_brax: {brax_new_state.pipeline_state.qd}")
 
 # Save data to file 
 np.save("data/data.npy", data)
