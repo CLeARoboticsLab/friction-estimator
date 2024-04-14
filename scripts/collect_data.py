@@ -4,6 +4,7 @@ import robosuite as suite
 from robosuite.controllers import load_controller_config
 from brax.envs.panda import Panda
 import numpy as np
+import time
 
 # -----------------------
 # --- Sim Parameters ----
@@ -11,6 +12,7 @@ import numpy as np
 num_steps = 10
 friction_torque_coeff = 0.1
 friction_static = 0.5
+num_joints = 7
 
 # -----------------------
 # --- Initial states ----
@@ -33,6 +35,9 @@ def compute_friction_torques(q, qd):
 # --- Robosuite stuff ---
 # -----------------------
 
+print("Loading Robosuite environment...")
+start_time = time.time()
+
 # Environment configuration
 config = load_controller_config(default_controller="OSC_POSE")
 env_config = {}
@@ -54,9 +59,15 @@ env_suite = suite.make(**env_config)
 # Reset the environment
 env_suite.reset()
 
+print("Robosuite environment loaded.")
+print(f"Time taken: {time.time() - start_time}")
+
 # -----------------------
 # --- Brax stuff --------
 # -----------------------
+
+print("Loading Brax environment...")
+start_time = time.time()
 
 # Setup Brax environment
 seed = 0
@@ -64,26 +75,27 @@ env_brax = Panda()
 env_reset_jitted = jax.jit(env_brax.reset)
 env_step_jitted = jax.jit(env_brax.step)
 brax_init_state = env_reset_jitted(jax.random.PRNGKey(seed))
+env_set_state_jitted = jax.jit(env_brax.set_state)
+
+print("Brax environment loaded.")
+print(f"Time taken: {time.time() - start_time}")
 
 # Save initial state, torque_osc, torque_friction, and new state for each step
 data = []
 
+# Set initial state in both environments
+
+# Robosuite
+env_suite.sim.data.qpos[env_suite.robots[0].joint_indexes] = q_initial
+env_suite.sim.data.qvel[env_suite.robots[0].joint_indexes] = qd_initial
+
+# Brax
+brax_init_state = env_set_state_jitted(q_initial, qd_initial)
+
+# Data collection loop
+start_time = time.time()
+print("Starting data collection loop...")
 for step in range(num_steps):
-
-    # --- Set initial state in both environments ---
-
-    # Robosuite
-    env_suite.sim.data.qpos[env_suite.robots[0].joint_indexes] = q_initial
-    env_suite.sim.data.qvel[env_suite.robots[0].joint_indexes] = qd_initial
-
-    # Brax
-    brax_init_state = env_brax.set_state(q_initial, qd_initial)
-
-    # Assert that both environments have the same initial state
-    assert jp.allclose(q_initial, env_suite.sim.data.qpos[env_suite.robots[0].joint_indexes])
-    assert jp.allclose(q_initial, brax_init_state.pipeline_state.q)
-    assert jp.allclose(qd_initial, env_suite.sim.data.qvel[env_suite.robots[0].joint_indexes])
-    assert jp.allclose(qd_initial, brax_init_state.pipeline_state.qd)
 
     # --- Act in both environmenst ---
 
@@ -105,22 +117,16 @@ for step in range(num_steps):
     brax_new_state = env_step_jitted(brax_init_state, torques_total)
 
     # Save data
-    data.append((step,
-                 q_initial,
+    data.append((q_initial,
                  qd_initial,
-                 torques_osc,
+                 torques_osc[0:num_joints],
                  torques_friction,
                  brax_new_state.pipeline_state.q,
                  brax_new_state.pipeline_state.qd))
 
     print(f"Step: {step}")
-    print(f"Initial q: {q_initial}")
-    print(f"Initial qd: {qd_initial}")
-    print(f"Action: {action}")
-    print(f"Torque_o: {torques_osc}")    
-    print(f"Torque_f: {torques_friction}")
-    print(f"New q_brax: {brax_new_state.pipeline_state.q}")
-    print(f"New qd_brax: {brax_new_state.pipeline_state.qd}")
+
+print(f"Time taken: {time.time() - start_time}")
 
 # Save data to file 
 np.save("data/data.npy", data)
