@@ -9,7 +9,7 @@ import time
 # -----------------------
 # --- Sim Parameters ----
 # -----------------------
-num_steps = 10
+num_steps = 10000
 friction_torque_coeff = 0.1
 friction_static = 0.5
 num_joints = 7
@@ -81,7 +81,9 @@ print("Brax environment loaded.")
 print(f"Time taken: {time.time() - start_time}")
 
 # Save initial state, torque_osc, torque_friction, and new state for each step
-data = []
+data_states_init = []
+data_torques = []
+data_states_new = []
 
 # Set initial state in both environments
 
@@ -110,23 +112,28 @@ for step in range(num_steps):
     torques_osc = env_suite.sim.data.ctrl
 
     # Compute friction torques given the initial state
-    torques_friction = compute_friction_torques(q_initial, qd_initial)
+    torques_friction = compute_friction_torques(
+        brax_init_state.pipeline_state.q, brax_init_state.pipeline_state.qd
+    )
 
     # Step Brax environment with osc torques + friction torques
-    torques_total = torques_osc[env_suite.robots[0].joint_indexes] + torques_friction
+    torques_total = (
+        torques_osc[env_suite.robots[0].joint_indexes] + torques_friction
+    )
     brax_new_state = env_step_jitted(brax_init_state, torques_total)
 
     # Save data
-    data.append((q_initial,
-                 qd_initial,
-                 torques_osc[0:num_joints],
-                 torques_friction,
-                 brax_new_state.pipeline_state.q,
-                 brax_new_state.pipeline_state.qd))
-
+    data_states_init.append(brax_new_state)
+    data_torques.append((jp.array(torques_osc[0:num_joints]), torques_friction))
+    data_states_new.append(brax_new_state)
     print(f"Step: {step}")
 
-print(f"Time taken: {time.time() - start_time}")
+    # Update initial state
+    brax_init_state = brax_new_state
 
-# Save data to file 
-np.save("data/data.npy", data)
+print(f"Time taken: {time.time() - start_time}"),
+
+# Save data to file
+np.save("data/data_states_init.npy", data_states_init)
+np.save("data/data_torques.npy", data_torques)
+np.save("data/data_states_new.npy", data_states_new)
