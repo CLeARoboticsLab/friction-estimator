@@ -9,7 +9,7 @@ import time
 # -----------------------
 # --- Sim Parameters ----
 # -----------------------
-num_steps = 10000
+num_steps = 1024
 friction_torque_coeff = 0.1
 friction_static = 0.5
 num_joints = 7
@@ -83,6 +83,7 @@ print(f"Time taken: {time.time() - start_time}")
 # Save initial state, torque_osc, torque_friction, and new state for each step
 data_states_init = []
 data_torques = []
+data_friction = []
 data_states_new = []
 
 # Set initial state in both environments
@@ -124,7 +125,8 @@ for step in range(num_steps):
 
     # Save data
     data_states_init.append(brax_new_state)
-    data_torques.append((jp.array(torques_osc[0:num_joints]), torques_friction))
+    data_torques.append(torques_osc[0:num_joints])
+    data_friction.append(torques_friction)
     data_states_new.append(brax_new_state)
     print(f"Step: {step}")
 
@@ -136,4 +138,5 @@ print(f"Time taken: {time.time() - start_time}"),
 # Save data to file
 np.save("data/data_states_init.npy", data_states_init)
 np.save("data/data_torques.npy", data_torques)
+np.save("data/data_friction.npy", data_friction)
 np.save("data/data_states_new.npy", data_states_new)
