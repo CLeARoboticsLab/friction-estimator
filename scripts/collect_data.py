@@ -21,7 +21,17 @@ key = jax.random.key(0)
 # -----------------------
 # --- Initial states ----
 # -----------------------
-q_initial = jp.array([0, jp.pi / 16.0, 0.00, -jp.pi / 2.0 - jp.pi / 3.0, 0.00, jp.pi - 0.2, jp.pi / 4])
+q_initial = jp.array(
+    [
+        0,
+        jp.pi / 16.0,
+        0.00,
+        -jp.pi / 2.0 - jp.pi / 3.0,
+        0.00,
+        jp.pi - 0.2,
+        jp.pi / 4,
+    ]
+)
 qd_initial = jp.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 
 # -----------------------
@@ -51,7 +61,9 @@ env_config["camera_names"] = ["frontview"]
 env_config["camera_heights"] = 480
 env_config["camera_widths"] = 480
 env_config["control_freq"] = 10
-env_config["controller_configs"] = suite.load_controller_config(default_controller="OSC_POSE")
+env_config["controller_configs"] = suite.load_controller_config(
+    default_controller="OSC_POSE"
+)
 env_config["has_renderer"] = False
 env_config["has_offscreen_renderer"] = False
 env_config["ignore_done"] = True
@@ -101,6 +113,7 @@ brax_init_state = env_set_state_jitted(q_initial, qd_initial)
 print("Initial state set.")
 print(f"Time taken: {time.time() - start_time}")
 
+
 # Data class
 @flax.struct.dataclass
 class MyData:
@@ -134,5 +147,5 @@ print(f"Time taken: {time.time() - start_time}"),
 
 
 # Save data
-with open('data/data.pkl', 'wb') as f:
+with open("data/data.pkl", "wb") as f:
     pickle.dump(data, f)
