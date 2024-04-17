@@ -12,11 +12,12 @@ import pickle
 # -----------------------
 # --- Sim Parameters ----
 # -----------------------
-num_steps = 256
+num_steps = 1024
 friction_torque_coeff = 0.1
 friction_static = 0.5
 num_joints = 7
 key = jax.random.key(0)
+key_states = jax.random.split(key, num=num_steps)
 
 # -----------------------
 # --- Initial states ----
@@ -97,22 +98,6 @@ low, high = env_suite.action_spec
 print("Brax environment loaded.")
 print(f"Time taken: {time.time() - start_time}")
 
-# Set initial state in both environments
-
-
-print("Setting initial state in both environments...")
-start_time = time.time()
-
-# Robosuite
-env_suite.sim.data.qpos[env_suite.robots[0].joint_indexes] = q_initial
-env_suite.sim.data.qvel[env_suite.robots[0].joint_indexes] = qd_initial
-
-# Brax
-brax_init_state = env_set_state_jitted(q_initial, qd_initial)
-
-print("Initial state set.")
-print(f"Time taken: {time.time() - start_time}")
-
 
 # Data class
 @flax.struct.dataclass
@@ -123,26 +108,57 @@ class MyData:
     next_state: State
 
 
-# Data collection function
-def make_data(key):
-    init_state = env_reset_jitted(key)
-    action = np.random.uniform(low, high)
+# ----------------------------
+# --- Generate OSC torques ---
+# ----------------------------
+torques = []
+for i in range(num_steps):
+    # Sample brax env
+    init_state = env_reset_jitted(key_states[i])
+
+    # Set robosuite env
+    env_suite.sim.data.qpos[env_suite.robots[0].joint_indexes] = (
+        init_state.pipeline_state.q
+    )
+    env_suite.sim.data.qvel[env_suite.robots[0].joint_indexes] = (
+        init_state.pipeline_state.qd
+    )
+
+    # Sample action and compute osc torques
+    action = np.random.uniform(low, high)  # use jax for this?
     _, _, _, _ = env_suite.step(action)
     torques_osc = env_suite.sim.data.ctrl
-    torques_friction = compute_friction_torques(
-        brax_init_state.pipeline_state.q, brax_init_state.pipeline_state.qd
-    )
-    torques_total = (
-        torques_osc[env_suite.robots[0].joint_indexes] + torques_friction
-    )
-    next_state = env_step_jitted(brax_init_state, torques_total)
 
-    return MyData(init_state, torques_osc, torques_friction, next_state)
+    # Save torques
+    torques.append(torques_osc[0:num_joints])
+
+torques = jp.stack(torques)
+
+
+# ----------------------------
+# --- Collect data  ----------
+# ----------------------------
+
+
+# Data collection function
+def make_data(key, torque):
+    # Sample init brax state and compute friction torques
+    init_state = env_reset_jitted(key)
+    friction = compute_friction_torques(
+        init_state.pipeline_state.q, init_state.pipeline_state.qd
+    )
+
+    # Step in both environments
+    next_state = env_step_jitted(init_state, torque + friction)
+
+    return MyData(init_state, torque, friction, next_state)
 
 
 # Collect data
 print("Starting data collection loop...")
-data = jax.vmap(make_data)(jax.random.split(key, num=num_steps))
+start_time = time.time()
+data = jax.vmap(make_data)(key_states, torques)
+print("Data collection loop finished.")
 print(f"Time taken: {time.time() - start_time}"),
 
 
