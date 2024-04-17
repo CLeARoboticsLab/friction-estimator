@@ -8,12 +8,15 @@ import jax
 class Panda(PipelineEnv):
     """Panda environment."""
 
-    def __init__(self,
-                 theta_des=jp.pi/4.0,
-                 action_scale=1.0,
-                 initial_theta_range=(-jp.pi, jp.pi),
-                 initial_thetadot_range=(-0.1, 0.1),
-                 backend='generalized', **kwargs):
+    def __init__(
+        self,
+        theta_des=jp.pi / 4.0,
+        action_scale=1.0,
+        initial_theta_range=(-jp.pi, jp.pi),
+        initial_thetadot_range=(-0.1, 0.1),
+        backend="generalized",
+        **kwargs
+    ):
 
         # get the brax system for panda
         sys = PandaUtils.get_system()
@@ -38,14 +41,16 @@ class Panda(PipelineEnv):
         rng1, rng2 = jax.random.split(rng, 2)
 
         q = self.sys.init_q + jax.random.uniform(
-            rng1, (self.sys.q_size(),),
+            rng1,
+            (self.sys.q_size(),),
             minval=self._initial_theta_range[0],
-            maxval=self._initial_theta_range[1]
+            maxval=self._initial_theta_range[1],
         )
         qd = jax.random.uniform(
-            rng2, (self.sys.qd_size(),),
+            rng2,
+            (self.sys.qd_size(),),
             minval=self._initial_thetadot_range[0],
-            maxval=self._initial_thetadot_range[1]
+            maxval=self._initial_thetadot_range[1],
         )
         pipeline_state = self.pipeline_init(q, qd)
         obs = self._get_obs(pipeline_state)
@@ -53,7 +58,7 @@ class Panda(PipelineEnv):
         metrics = {}
 
         return State(pipeline_state, obs, reward, done, metrics)
-    
+
     def set_state(self, q, qd) -> State:
         """Sets the environment state to a specific state."""
         pipeline_state = self.pipeline_init(q, qd)
@@ -85,17 +90,19 @@ class Panda(PipelineEnv):
         done = jp.zeros_like(reward)
 
         return state.replace(
-            pipeline_state=new_pipeline_state, obs=obs, reward=reward, done=done
+            pipeline_state=new_pipeline_state,
+            obs=obs,
+            reward=reward,
+            done=done,
         )
 
     def _get_obs(self, pipeline_state: base.State) -> jp.ndarray:
         """Observations: q; qd"""
         return jp.concatenate([pipeline_state.q, pipeline_state.qd])
 
-    def _compute_reward(self,
-                        prev_obs: jp.ndarray,
-                        obs: jp.ndarray,
-                        action: jp.ndarray) -> jp.ndarray:
+    def _compute_reward(
+        self, prev_obs: jp.ndarray, obs: jp.ndarray, action: jp.ndarray
+    ) -> jp.ndarray:
 
         reward = -jp.linalg.norm(prev_obs - obs)
         return reward
