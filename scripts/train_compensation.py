@@ -1,20 +1,36 @@
 import jax
 import optax
 import flax
-import numpy as np
+import pickle
+
 from brax.training import networks
 from brax.training.types import Params
 from brax.training.types import PRNGKey
-from brax.envs.base import State
-from brax.training import gradients
+from brax.envs import State
 from brax.envs.panda import Panda
 from jax import numpy as jp
 
+jax.config.update("jax_disable_jit", True)
+
+
+# Define the dataclass
+@flax.struct.dataclass
+class MyData:
+    init_state: State
+    torque: jp.ndarray
+    friction: jp.ndarray
+    next_state: State
+
+
+# Load data
+with open('brax/scripts/data/data.pkl', 'rb') as f:
+    data = pickle.load(f)
 
 # Training parameters
 num_joints = 7
-num_epochs = 2
 batch_size = 256
+data_length = 8192
+num_epochs = 4
 input_dim = 28 * 28
 learning_rate = 1e-3
 log_interval = 10
@@ -63,113 +79,74 @@ seed = 0
 env_brax = Panda()
 env_reset_jitted = jax.jit(env_brax.reset)
 env_step_jitted = jax.jit(env_brax.step)
-brax_init_state = env_reset_jitted(jax.random.PRNGKey(seed))
-env_set_state_jitted = jax.jit(env_brax.set_state)
 
 
 # Loss function
-def make_loss(network: networks.MLP):
-    def loss(
-        params: Params,
-        state_init: State,
-        torques_osc: jp.ndarray,
-        state_new: State,
-    ):
-        # Compute friction
-        torques_friction = network.apply(
-            params,
-            jp.concatenate(
-                [
-                    state_init.pipeline_state.q_0,
-                    state_init.pipeline_state.qd_0,
-                ]
-            ),
-        )
-        
-        # Step brax
-        state_torqued = env_step_jitted(
-            state_init, torques_osc + torques_friction
-        )
+def loss_fn(params, data):
 
-        # Compute loss
-        loss = jp.mean(
-            (
-                jp.concatenate(
-                    [
-                        state_new.pipeline_state.q,
-                        state_new.pipeline_state.qd,
-                    ]
-                )
-                - jp.concatenate(
-                    [
-                        state_torqued.pipeline_state.q,
-                        state_torqued.pipeline_state.qd,
-                    ]
-                )
-            )
-            ** 2
-        )
-        return loss
-
-    return loss
-
-
-# Init training state and function
-loss_fn = make_loss(network)
-update = gradients.gradient_update_fn(loss_fn, optimizer,
-                                      pmap_axis_name=None,
-                                      has_aux=False)
-key, key_init = jax.random.split(key)
-training_state = _init_training_state(key_init, network, optimizer)
-
-
-# Define gradient descent
-def sgd_step(carry, in_element):
-    params, opt_state = carry
-    states_init, torques_osc, states_new = in_element
-    loss, new_params, opt_state = update(
-        params, states_init, torques_osc, states_new, optimizer_state=opt_state
+    initial_pose = jp.concatenate(
+        [data.init_state.pipeline_state.q, data.init_state.pipeline_state.qd],
+        axis=1,
     )
-    return (new_params, opt_state), loss
+    torques_friction = network.apply(
+        params, initial_pose
+    )  # i/o both (batch_size, num_joints)
+
+    # Compute the next state
+    next_state = jax.vmap(env_step_jitted)(
+        data.init_state, data.torque + torques_friction
+    )
+
+    return jp.mean(
+        (next_state.pipeline_state.q - data.next_state.pipeline_state.q) ** 2
+        + (next_state.pipeline_state.qd - data.next_state.pipeline_state.qd)
+        ** 2
+    )
+
+
+def sgd_step(carry, in_element):
+    # carry is the carry, in_element is the input data
+    params, opt_state = carry
+    data = in_element
+    sgd_loss, params_grad = jax.value_and_grad(loss_fn)(params, data)
+    print(f"sgd_loss {sgd_loss}")
+    updates, opt_state = optimizer.update(params_grad, opt_state)
+    new_params = optax.apply_updates(params, updates)
+    return (new_params, opt_state), sgd_loss
 
 
 # Define training epoch
-@jax.jit
-def train_epoch(
-    training_state: TrainingState,
-    states_init: jp.ndarray,
-    torques_osc: jp.ndarray,
-    states_new: jp.ndarray,
-):
-    # normally you would shuffle data here
-    # reshape into (num_batches, batch_size, dim)
-    num_batches = states_init.shape[0] // batch_size
-    states_init_batch = states_init.reshape(num_batches, batch_size)
-    torques_osc_batch = torques_osc.reshape(num_batches, batch_size)
-    states_new_batch = states_new.reshape(num_batches, batch_size)
+def train_epoch(training_state: TrainingState, data, key):
 
-    print("test")
+    # Setup batch
+    permuted_idx = jax.random.permutation(key, data_length)
+    num_batches = data_length // batch_size
+    shuffled_data = jax.tree_util.tree_map(lambda x: x[permuted_idx], data)
+    batched_data = jax.tree_util.tree_map(
+        lambda x: jp.reshape(x, (num_batches, batch_size) + x.shape[1:]),
+        shuffled_data,
+    )
 
+    # Training for epoch
     (new_params, new_opt_state), losses = jax.lax.scan(
         sgd_step,
         (training_state.params, training_state.opt_state),
-        (states_init_batch, torques_osc_batch, states_new_batch))
+        batched_data,
+    )
 
-    new_training_state = training_state.replace(
-        params=new_params, opt_state=new_opt_state)
+    print(f"losses {losses}")
 
-    return new_training_state, jp.mean(losses)
-
-
-# Load data
-states_init = jp.load('data_states_init.npy')
-torques_osc = jp.load('data_torques_osc.npy')
-states_new = jp.load('data_states_new.npy')
+    return TrainingState(
+        opt_state=new_opt_state, params=new_params
+    ), jp.mean(losses)
 
 
 # Run training loop
+key_init = jax.random.PRNGKey(seed)
+training_state = _init_training_state(key_init, network, optimizer)
 for epoch in range(num_epochs):
-    training_state, loss = train_epoch(
-        training_state, states_init, torques_osc, states_new
+    key, key_init = jax.random.split(key_init)
+    training_state, epoch_loss = train_epoch(
+        training_state, data, key
     )
-    print(f"epoch {epoch}, loss {loss:.2f}")
+    print(f"epoch {epoch}, loss {epoch_loss:.2f}")
