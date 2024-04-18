@@ -2,6 +2,8 @@ import jax
 import optax
 import flax
 import pickle
+import time
+import matplotlib.pyplot as plt
 
 from brax.training import networks
 from brax.training.types import Params
@@ -11,10 +13,12 @@ from brax.envs.panda import Panda
 from jax import numpy as jp
 from jax.config import config
 
+# Debugging utilities
 # jax.config.update("jax_disable_jit", True)
 config.update("jax_enable_x64", True)
 
-# Define the dataclass
+
+# Define the data class
 @flax.struct.dataclass
 class MyData:
     init_state: State
@@ -26,16 +30,16 @@ class MyData:
 # Load data
 # with open('brax/scripts/data/data.pkl', 'rb') as f:
 #     data = pickle.load(f)
-with open('data/data.pkl', 'rb') as f:
+with open("data/data.pkl", "rb") as f:
     data = pickle.load(f)
 
 # Training parameters
 num_joints = 7
-batch_size = 256
-data_length = 1024
-num_epochs = 20
-input_dim = 28 * 28
-learning_rate = 1e-3
+batch_size = 1024
+data_length = 16384
+test_length = 1024
+num_epochs = 100
+learning_rate = 1e-2
 log_interval = 10
 input_size = num_joints * 2
 hidden_layer_dim = 256
@@ -100,11 +104,7 @@ def loss_fn(params, data):
         data.init_state, data.torque + torques_friction
     )
 
-    return jp.mean(
-        (next_state.pipeline_state.q - data.next_state.pipeline_state.q) ** 2
-        + (next_state.pipeline_state.qd - data.next_state.pipeline_state.qd)
-        ** 2
-    )
+    return jp.mean((next_state.obs - data.next_state.obs) ** 2)
 
 
 def sgd_step(carry, in_element):
@@ -137,19 +137,74 @@ def train_epoch(training_state: TrainingState, data, key):
         batched_data,
     )
 
-    print(f"epoch losses {losses}")
+    return TrainingState(opt_state=new_opt_state, params=new_params), jp.mean(
+        losses
+    )
 
-    return TrainingState(
-        opt_state=new_opt_state, params=new_params
-    ), jp.mean(losses)
+
+# Split data
+data_train = jax.tree_util.tree_map(
+    lambda x: x[: data_length - test_length], data
+)
+data_test = jax.tree_util.tree_map(
+    lambda x: x[data_length - test_length :], data
+)
+
+
+# Eval function for test data
+# Requires knowledge of friction
+def eval_loss_fn(params, data):
+    return jp.mean(
+        (network.apply(params, data.init_state.obs) - data.friction) ** 2
+    )
+
+
+def eval_step(carry, in_element):
+    params = carry
+    data = in_element
+    eval_loss = eval_loss_fn(params, data)
+    return params, eval_loss
+
+
+@jax.jit
+def evaluate_epoch(training_state: TrainingState, data):
+    _, eval_losses = jax.lax.scan(eval_step, training_state.params, data)
+    return jp.mean(eval_losses)
 
 
 # Run training loop
 key_init = jax.random.PRNGKey(seed)
 training_state = _init_training_state(key_init, network, optimizer)
+losses = []
+eval_losses = []
+print("Training started...")
+start_time = time.time()
 for epoch in range(num_epochs):
+    # Train
     key, key_init = jax.random.split(key_init)
-    training_state, epoch_loss = train_epoch(
-        training_state, data, key
-    )
-    print(f"epoch {epoch}, loss {epoch_loss:.2f}")
+    training_state, epoch_loss = train_epoch(training_state, data_train, key)
+    losses.append(epoch_loss)
+
+    # Eval
+    epoch_eval_loss = evaluate_epoch(training_state, data_test)
+    eval_losses.append(epoch_eval_loss)
+
+    print(f"epoch {epoch}, loss {epoch_loss}, eval_loss {eval_losses[-1]}")
+print(f"Training finished. Time taken: {time.time() - start_time}")
+
+# Plot the losses
+plt.figure()
+plt.plot(losses)
+plt.xlabel("Epoch")
+plt.ylabel("Loss")
+plt.yscale("log")  # Set y-axis to logarithmic scale
+plt.title("Training Loss")
+plt.savefig("figures/training_loss.png")
+
+# Make new plot and save evaluation loss
+plt.figure()
+plt.plot(eval_losses)
+plt.xlabel("Epoch")
+plt.ylabel("Loss")
+plt.title("Evaluation Loss")
+plt.savefig("figures/evaluation_loss.png")
