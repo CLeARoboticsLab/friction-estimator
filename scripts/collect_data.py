@@ -8,41 +8,35 @@ from brax.envs import State
 import numpy as np
 import time
 import pickle
+from jax.config import config
+
+
+# -----------------------
+# --- Debug Utils -------
+# -----------------------
+# jax.config.update("jax_disable_jit", True)
+config.update("jax_enable_x64", True)
+
 
 # -----------------------
 # --- Sim Parameters ----
 # -----------------------
-num_steps = 1024
-friction_torque_coeff = 0.1
-friction_static = 0.5
+num_steps = 2 ** 14
+friction_torque_coeff = 10000.0  # silly high value
+friction_static = 500.0  # silly high value
+torque_logging_interval = 100
 num_joints = 7
 key = jax.random.key(0)
 key_states = jax.random.split(key, num=num_steps)
-
-# -----------------------
-# --- Initial states ----
-# -----------------------
-q_initial = jp.array(
-    [
-        0,
-        jp.pi / 16.0,
-        0.00,
-        -jp.pi / 2.0 - jp.pi / 3.0,
-        0.00,
-        jp.pi - 0.2,
-        jp.pi / 4,
-    ]
-)
-qd_initial = jp.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 
 # -----------------------
 # --- Friction model ----
 # -----------------------
 
 
+# Friction torque proportional and opposite to joint velocity.
+# If any element of qd is zero, the corresponding friction torque is zero.
 def compute_friction_torques(q, qd):
-    # Friction torque proportional and opposite to joint velocity.
-    # If any element of qd is zero, the corresponding friction torque is zero.
     return jp.where(qd != 0, -friction_torque_coeff * qd, friction_static)
 
 
@@ -91,8 +85,6 @@ seed = 0
 env_brax = Panda()
 env_reset_jitted = jax.jit(env_brax.reset)
 env_step_jitted = jax.jit(env_brax.step)
-brax_init_state = env_reset_jitted(jax.random.PRNGKey(seed))
-env_set_state_jitted = jax.jit(env_brax.set_state)
 low, high = env_suite.action_spec
 
 print("Brax environment loaded.")
@@ -111,6 +103,9 @@ class MyData:
 # ----------------------------
 # --- Generate OSC torques ---
 # ----------------------------
+print("Generating OSC torques...")
+start_time = time.time()
+
 torques = []
 for i in range(num_steps):
     # Sample brax env
@@ -132,8 +127,13 @@ for i in range(num_steps):
     # Save torques
     torques.append(torques_osc[0:num_joints])
 
+    if i % torque_logging_interval == 0:
+        print(f"Step {i} of {num_steps}")
+
 torques = jp.stack(torques)
 
+print("OSC torques generated.")
+print(f"Time taken: {time.time() - start_time}")
 
 # ----------------------------
 # --- Collect data  ----------
