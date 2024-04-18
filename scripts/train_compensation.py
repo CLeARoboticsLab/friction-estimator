@@ -9,9 +9,10 @@ from brax.training.types import PRNGKey
 from brax.envs import State
 from brax.envs.panda import Panda
 from jax import numpy as jp
+from jax.config import config
 
-jax.config.update("jax_disable_jit", True)
-
+# jax.config.update("jax_disable_jit", True)
+config.update("jax_enable_x64", True)
 
 # Define the dataclass
 @flax.struct.dataclass
@@ -23,14 +24,16 @@ class MyData:
 
 
 # Load data
-with open('brax/scripts/data/data.pkl', 'rb') as f:
+# with open('brax/scripts/data/data.pkl', 'rb') as f:
+#     data = pickle.load(f)
+with open('data/data.pkl', 'rb') as f:
     data = pickle.load(f)
 
 # Training parameters
 num_joints = 7
 batch_size = 256
-data_length = 8192
-num_epochs = 4
+data_length = 1024
+num_epochs = 20
 input_dim = 28 * 28
 learning_rate = 1e-3
 log_interval = 10
@@ -109,13 +112,13 @@ def sgd_step(carry, in_element):
     params, opt_state = carry
     data = in_element
     sgd_loss, params_grad = jax.value_and_grad(loss_fn)(params, data)
-    print(f"sgd_loss {sgd_loss}")
     updates, opt_state = optimizer.update(params_grad, opt_state)
     new_params = optax.apply_updates(params, updates)
     return (new_params, opt_state), sgd_loss
 
 
 # Define training epoch
+@jax.jit
 def train_epoch(training_state: TrainingState, data, key):
 
     # Setup batch
@@ -134,7 +137,7 @@ def train_epoch(training_state: TrainingState, data, key):
         batched_data,
     )
 
-    print(f"losses {losses}")
+    print(f"epoch losses {losses}")
 
     return TrainingState(
         opt_state=new_opt_state, params=new_params
