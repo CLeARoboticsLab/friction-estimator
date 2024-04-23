@@ -36,10 +36,10 @@ with open("data/data.pkl", "rb") as f:
 # Training parameters
 num_joints = 7
 batch_size = 1024
-data_length = 16384
+data_length = data.torque.shape[0]
 test_length = 1024
 num_epochs = 100
-learning_rate = 1e-2
+learning_rate = 1e-3
 log_interval = 10
 input_size = num_joints * 2
 hidden_layer_dim = 256
@@ -154,9 +154,21 @@ data_test = jax.tree_util.tree_map(
 # Eval function for test data
 # Requires knowledge of friction
 def eval_loss_fn(params, data):
-    return jp.mean(
-        (network.apply(params, data.init_state.obs) - data.friction) ** 2
+
+    initial_pose = jp.concatenate(
+        [data.init_state.pipeline_state.q, data.init_state.pipeline_state.qd],
+        axis=1,
     )
+    torques_friction = network.apply(
+        params, initial_pose
+    )  # i/o both (batch_size, num_joints)
+
+    # Compute the next state
+    next_state = jax.vmap(env_step_jitted)(
+        data.init_state, data.torque + torques_friction
+    )
+
+    return jp.mean((next_state.obs - data.next_state.obs) ** 2)
 
 
 def eval_step(carry, in_element):
@@ -168,7 +180,13 @@ def eval_step(carry, in_element):
 
 @jax.jit
 def evaluate_epoch(training_state: TrainingState, data):
-    _, eval_losses = jax.lax.scan(eval_step, training_state.params, data)
+    batched_data = jax.tree_util.tree_map(
+        lambda x: jp.reshape(x, (1, test_length) + x.shape[1:]),
+        data,
+    )
+    _, eval_losses = jax.lax.scan(
+        eval_step, training_state.params, batched_data
+    )
     return jp.mean(eval_losses)
 
 
@@ -180,6 +198,7 @@ eval_losses = []
 print("Training started...")
 start_time = time.time()
 for epoch in range(num_epochs):
+    start_time_epoch = time.time()
     # Train
     key, key_init = jax.random.split(key_init)
     training_state, epoch_loss = train_epoch(training_state, data_train, key)
@@ -189,22 +208,35 @@ for epoch in range(num_epochs):
     epoch_eval_loss = evaluate_epoch(training_state, data_test)
     eval_losses.append(epoch_eval_loss)
 
-    print(f"epoch {epoch}, loss {epoch_loss}, eval_loss {eval_losses[-1]}")
+    print(
+        f"epoch {epoch}, loss: {epoch_loss}, eval loss: {eval_losses[-1]}, time taken: {time.time() - start_time_epoch}"
+    )
 print(f"Training finished. Time taken: {time.time() - start_time}")
 
-# Plot the losses
+# # Plot the losses
+# plt.figure()
+# plt.plot(losses)
+# plt.xlabel("Epoch")
+# plt.ylabel("Loss")
+# plt.yscale("log")  # Set y-axis to logarithmic scale
+# plt.title("Training Loss")
+# plt.savefig("figures/training_loss.png")
+
+# # Make new plot and save evaluation loss
+# plt.figure()
+# plt.plot(eval_losses)
+# plt.xlabel("Epoch")
+# plt.ylabel("Loss")
+# plt.title("Evaluation Loss")
+# plt.savefig("figures/evaluation_loss.png")
+
+# Plot validation and training loss in the same plot
 plt.figure()
-plt.plot(losses)
+plt.plot(losses, label="Training Loss")
+plt.plot(eval_losses, label="Evaluation Loss")
 plt.xlabel("Epoch")
 plt.ylabel("Loss")
 plt.yscale("log")  # Set y-axis to logarithmic scale
-plt.title("Training Loss")
-plt.savefig("figures/training_loss.png")
-
-# Make new plot and save evaluation loss
-plt.figure()
-plt.plot(eval_losses)
-plt.xlabel("Epoch")
-plt.ylabel("Loss")
-plt.title("Evaluation Loss")
-plt.savefig("figures/evaluation_loss.png")
+plt.legend()
+plt.title("Training and Evaluation Loss")
+plt.savefig("figures/training_and_evaluation_loss.png")
