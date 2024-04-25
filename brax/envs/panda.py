@@ -22,7 +22,7 @@ class Panda(PipelineEnv):
         sys = PandaUtils.get_system()
 
         # set the time step duration for the physics pipeline
-        sys = sys.replace(dt=0.01)
+        sys = sys.replace(dt=0.002)
 
         # the number of times to step the physics pipeline for each
         # environment step
