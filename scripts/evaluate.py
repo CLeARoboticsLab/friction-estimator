@@ -31,7 +31,7 @@ seed = 0
 friction_torque_coeff = 10.
 friction_static = 0.05
 
-num_steps = 200
+num_steps = 100
 torque_logging_interval = 10
 key = jax.random.key(0)
 key_states = jax.random.split(key, num=num_steps)
@@ -49,7 +49,7 @@ initial_q = np.array(
 initial_qd = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 timestep_length = 0.002
 
-perturbation_index = 1
+perturbation_index = 0
 perturbation_amount = 0.1
 
 plot_lim = 0.5
@@ -116,7 +116,7 @@ env_suite.sim.model.opt.timestep = timestep_length
 # Reset the environment
 obs = env_suite.reset()
 
-# TEMPORARY: Set initial state
+# Set initial robosuite state
 env_suite.sim.data.qpos[env_suite.robots[0].joint_indexes] = initial_q
 env_suite.sim.data.qvel[env_suite.robots[0].joint_indexes] = initial_qd
 
@@ -134,10 +134,10 @@ cartesian_perturbation = np.zeros(3)
 cartesian_perturbation[perturbation_index] = perturbation_amount
 action[0:3] = cartesian_perturbation
 
-
 # Run the simulation
 ee_positions_robosuite = []
 frames = []
+torques = []
 ee_positions_robosuite.append(obs['robot0_eef_pos'])
 frames.append(obs["sideview_image"])
 for i in range(num_steps):
@@ -151,56 +151,41 @@ for i in range(num_steps):
     # Record frame 
     frames.append(obs["sideview_image"])
 
+    # Record torques 
+    torques.append(env_suite.sim.data.ctrl)
+
     # Log
     if i % torque_logging_interval == 0:
         print(f"Step {i} of {num_steps}")
 
 ee_positions_robosuite = np.array(ee_positions_robosuite)
+torques = np.array(torques)
 
 print(f"Tracking done. Time taken: {time.time() - start_time}")
 
 
 # ----------------------------
-# --- Plottting --------------
+# --- Plot -----------------
 # ----------------------------
+
+# Make a subplot of torque over time for each torque
+# They should all be in the same figure
 total_perturbation = perturbation_amount * num_steps * timestep_length
 time_vec = np.arange(num_steps + 1) * timestep_length
 
-# Create subplots
-fig, axs = plt.subplots(1, 2, figsize=(10, 5))
+# Plot showing displacement of end effector coordinate given by perturbation_index
+plt.figure()
+plt.plot(time_vec, ee_positions_robosuite[:, perturbation_index], label="Robosuite")
+plt.xlabel("Time (s)")
+plt.ylabel(f"End effector {['x', 'y', 'z'][perturbation_index]} position")
+plt.legend()
 
-axs[0].plot(ee_positions_robosuite[:, 0], ee_positions_robosuite[:, 1])
-axs[0].set_xlabel("End effector x-position [m]")
-axs[0].set_ylabel("End effector y-position [m]")
-axs[0].set_xlim(-plot_lim, plot_lim)
-axs[0].set_ylim(-plot_lim, plot_lim)
-axs[0].set_aspect('equal', 'box')
-
-axs[1].plot(ee_positions_robosuite[:, 0], ee_positions_robosuite[:, 2])
-axs[1].set_xlabel("End effector x-position [m]")
-axs[1].set_ylabel("End effector z-position [m]")
-axs[1].set_xlim(-plot_lim, plot_lim)
-axs[1].set_ylim(0.0, 1.0)
-axs[1].set_aspect('equal', 'box')
-
-axs[0].scatter(ee_positions_robosuite[0, 0], ee_positions_robosuite[0, 1], color='g', label='Start')
-axs[1].scatter(ee_positions_robosuite[0, 0], ee_positions_robosuite[0, 2], color='g')
-
-axs[0].scatter(ee_positions_robosuite[-1, 0], ee_positions_robosuite[-1, 1], color='r', label='End')
-axs[1].scatter(ee_positions_robosuite[-1, 0], ee_positions_robosuite[-1, 2], color='r')
-
-axs[0].legend()  # To show labels for start and end points
-
-# Set common labels
-fig.suptitle(f"Total time taken: {num_steps * timestep_length} s")
-
-# Save the figure
 plt.savefig("figures/tracking_performance.png")
-
 
 # ----------------------------
 # --- Video ------------------
 # ----------------------------
+time_vec = np.arange(num_steps + 1) * timestep_length
 video_writer = imageio.get_writer("figures/video.mp4", fps=20)
 for idx, frame in enumerate(frames):
     frame = frame.astype(np.uint8)
