@@ -3,6 +3,7 @@ import jax
 import time
 import robosuite as suite
 import matplotlib.pyplot as plt
+import copy
 
 from robosuite.controllers import load_controller_config
 from brax.training import networks
@@ -90,10 +91,10 @@ print("Loading Robosuite environment...")
 start_time = time.time()
 
 # Environment configuration
-config = load_controller_config(default_controller="OSC_POSE")
 env_config = {}
 env_config["env_name"] = "Lift"
 env_config["robots"] = "Panda"
+env_config["robots"]
 env_config["camera_names"] = ["sideview"]
 env_config["camera_heights"] = 480
 env_config["camera_widths"] = 480
@@ -110,17 +111,46 @@ controller_config['control_delta'] = True
 env_config["controller_configs"] = controller_config
 
 # Make the environment
-env_suite = suite.make(**env_config)
-env_suite.sim.model.opt.timestep = timestep_length
+env_rs_vanilla = suite.make(**env_config)
+env_rs_vanilla.sim.model.opt.timestep = timestep_length
+
+env_rs_brax = suite.make(**copy.deepcopy(env_config))
+env_rs_brax.sim.model.opt.timestep = timestep_length
 
 # Reset the environment
-obs = env_suite.reset()
+obs_vanilla = env_rs_vanilla.reset()
+obs_brax = env_rs_brax.reset()
 
 # Set initial robosuite state
-env_suite.sim.data.qpos[env_suite.robots[0].joint_indexes] = initial_q
-env_suite.sim.data.qvel[env_suite.robots[0].joint_indexes] = initial_qd
+env_rs_vanilla.sim.data.qpos[env_rs_vanilla.robots[0].joint_indexes] = initial_q
+env_rs_vanilla.sim.data.qvel[env_rs_vanilla.robots[0].joint_indexes] = initial_qd
+
+env_rs_brax.sim.data.qpos[env_rs_brax.robots[0].joint_indexes] = initial_q
+env_rs_brax.sim.data.qvel[env_rs_brax.robots[0].joint_indexes] = initial_qd
 
 print(f"Robosuite environment loaded. Time taken: {time.time() - start_time}")
+
+# -----------------------
+# --- Brax stuff --------
+# -----------------------
+
+print("Loading Brax environment...")
+start_time = time.time()
+
+# Setup Brax environment
+seed = 0
+env_brax = Panda()
+env_reset_jitted = jax.jit(env_brax.reset)
+env_set_state_jitted = jax.jit(env_brax.set_state)
+env_step_jitted = jax.jit(env_brax.step)
+
+# Set initial state
+state_brax = env_set_state_jitted(initial_q, initial_qd)
+
+# Set integrator
+
+
+print(f"Brax environment loaded. Time taken: {time.time() - start_time}")
 
 # ----------------------------
 # --- Run tracking -----------
@@ -135,31 +165,48 @@ cartesian_perturbation[perturbation_index] = perturbation_amount
 action[0:3] = cartesian_perturbation
 
 # Run the simulation
-ee_positions_robosuite = []
-frames = []
-torques = []
-ee_positions_robosuite.append(obs['robot0_eef_pos'])
-frames.append(obs["sideview_image"])
+ee_pos_vanilla = []
+ee_pos_brax = []
+frames_vanilla = []
+frames_brax = []
+
 for i in range(num_steps):
 
-    # Step robosuite and get control torques
-    obs, _, _, _ = env_suite.step(action)
-
     # Save end effecttor position within robosuite
-    ee_positions_robosuite.append(obs['robot0_eef_pos'])
+    ee_pos_vanilla.append(obs_vanilla['robot0_eef_pos'])
+    ee_pos_brax.append(obs_brax['robot0_eef_pos'])
 
-    # Record frame 
-    frames.append(obs["sideview_image"])
+    # Record frame
+    frames_vanilla.append(obs_vanilla["sideview_image"])
+    frames_brax.append(obs_brax["sideview_image"])
 
-    # Record torques 
-    torques.append(env_suite.sim.data.ctrl)
+    # Step robosuite and get control torques
+    obs_vanilla, _, _, _ = env_rs_vanilla.step(action)
+    obs_brax, _, _, _ = env_rs_brax.step(action)
+
+    # Record torques
+    torques_control_vanilla = env_rs_vanilla.sim.data.ctrl
+    torques_control_brax = env_rs_brax.sim.data.ctrl
+
+    # Step brax
+    state_brax = env_step_jitted(
+        state_brax, torques_control_brax[0:num_joints]
+    )
+
+    # Set brax robosuite env to the same state as stepped brax
+    # env_rs_brax.sim.data.qpos[env_rs_brax.robots[0].joint_indexes] = (
+    #     state_brax.pipeline_state.q
+    # )
+    # env_rs_brax.sim.data.qvel[env_rs_brax.robots[0].joint_indexes] = (
+    #     state_brax.pipeline_state.qd
+    # )
 
     # Log
     if i % torque_logging_interval == 0:
         print(f"Step {i} of {num_steps}")
 
-ee_positions_robosuite = np.array(ee_positions_robosuite)
-torques = np.array(torques)
+ee_pos_vanilla = np.array(ee_pos_vanilla)
+ee_pos_brax = np.array(ee_pos_brax)
 
 print(f"Tracking done. Time taken: {time.time() - start_time}")
 
@@ -171,11 +218,12 @@ print(f"Tracking done. Time taken: {time.time() - start_time}")
 # Make a subplot of torque over time for each torque
 # They should all be in the same figure
 total_perturbation = perturbation_amount * num_steps * timestep_length
-time_vec = np.arange(num_steps + 1) * timestep_length
+time_vec = np.arange(num_steps) * timestep_length
 
 # Plot showing displacement of end effector coordinate given by perturbation_index
 plt.figure()
-plt.plot(time_vec, ee_positions_robosuite[:, perturbation_index], label="Robosuite")
+plt.plot(time_vec, ee_pos_vanilla[:, perturbation_index], label="Robosuite")
+plt.plot(time_vec, ee_pos_brax[:, perturbation_index], label="Brax")
 plt.xlabel("Time (s)")
 plt.ylabel(f"End effector {['x', 'y', 'z'][perturbation_index]} position")
 plt.legend()
@@ -185,22 +233,29 @@ plt.savefig("figures/tracking_performance.png")
 # ----------------------------
 # --- Video ------------------
 # ----------------------------
-time_vec = np.arange(num_steps + 1) * timestep_length
-video_writer = imageio.get_writer("figures/video.mp4", fps=20)
-for idx, frame in enumerate(frames):
-    frame = frame.astype(np.uint8)
-    frame = cv2.flip(frame, 0)
-    cv2.putText(
-        frame,
-        f"t = {time_vec[idx]}s",
-        (10, 30),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        1,
-        (0, 0, 255),
-        2,
-        cv2.LINE_AA,
-    )
 
-    video_writer.append_data(frame)
 
-video_writer.close()
+def save_video(frames, title="video"):
+    time_vec = np.arange(num_steps + 1) * timestep_length
+    video_writer = imageio.get_writer("figures/" + title + ".mp4", fps=20)
+    for idx, frame in enumerate(frames):
+        frame = frame.astype(np.uint8)
+        frame = cv2.flip(frame, 0)
+        cv2.putText(
+            frame,
+            f"t = {time_vec[idx]}s",
+            (10, 30),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1,
+            (0, 0, 255),
+            2,
+            cv2.LINE_AA,
+        )
+
+        video_writer.append_data(frame)
+
+    video_writer.close()
+
+
+save_video(frames_vanilla, "vanilla")
+save_video(frames_brax, "brax")
