@@ -40,13 +40,16 @@ class DoublePendulum(PipelineEnv):
         self._K = jp.array([[64., 17., 25., 9.],
                             [17., 30., 9., 8.]])
 
+        # feedback gains for OS controller
+        self._K_osc = jp.array([10.0])
+
         # desired position of the end effector
         self._ydes = 1.5
         self._zdes = 1.5
 
         # Friction parameters
-        self.friction_torque_coeff = 1.0
-        self.friction_static = 0.1
+        self.friction_torque_coeff = 0.0
+        self.friction_static = 0.0
 
     def reset(self, rng: jp.ndarray) -> State:
         """Resets the environment to an initial state."""
@@ -65,7 +68,7 @@ class DoublePendulum(PipelineEnv):
         u = jp.zeros(self.sys.act_size())
 
         return State(pipeline_state, obs, reward, done, metrics, u=u)
-    
+
     def set_state(self, q: jp.ndarray, qd: jp.ndarray) -> State:
         """Sets the state of the environment."""
         pipeline_state = self.pipeline_init(q, qd)
@@ -81,7 +84,7 @@ class DoublePendulum(PipelineEnv):
         prev_obs = self._get_obs(state.pipeline_state)
 
         # compute low-level control
-        u = self.low_level_control(action, prev_obs)
+        u = self.osc_control(action, prev_obs)
 
         # take an environment step with low level control
         pipeline_state = self.pipeline_step(state.pipeline_state, u)
@@ -105,7 +108,7 @@ class DoublePendulum(PipelineEnv):
         prev_obs = self._get_obs(state.pipeline_state)
 
         # compute low-level control
-        u = self.low_level_control(action, prev_obs)
+        u = self.osc_control(action, prev_obs)
 
         # Add friction
         friction = self.calculate_friction(state)
@@ -160,6 +163,24 @@ class DoublePendulum(PipelineEnv):
 
         return u
 
+    def osc_control(self, action: jp.ndarray, obs: jp.ndarray) -> jp.ndarray:
+        """Compute control using the operational space control law.
+            Action is desired position. Assumes desired velocity is 0."""
+        J = DoublePendulumUtils.compute_jacobian(obs[:2])
+        M = DoublePendulumUtils.compute_os_mass_matrix(obs[:2])
+        grav_torque = DoublePendulumUtils.compute_grav_torque(obs[:2])
+        x, y, z = DoublePendulumUtils.end_effector_position(obs[:2])
+        return (
+            jp.matmul(
+                J.T,
+                jp.matmul(
+                    M,
+                    self._K_osc[0] * (action - jp.array([x, y, z, 0.0, 0.0, 0.0]))
+                ),
+            )
+            + grav_torque
+        )
+
     def compute_reward(self, obs: jp.ndarray, prev_obs: jp.ndarray,
                        u: jp.ndarray,
                        unscaled_action: jp.ndarray) -> jp.ndarray:
@@ -168,7 +189,7 @@ class DoublePendulum(PipelineEnv):
         q = obs[:self.sys.q_size()]
 
         # compute end effector position
-        y, z = DoublePendulumUtils.end_effector_position(q)
+        x, y, z = DoublePendulumUtils.end_effector_position(q)
 
         # higher reward the closer the end effector is to the desired position
         ysq = (y - self._ydes)**2
