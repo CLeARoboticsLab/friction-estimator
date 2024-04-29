@@ -41,15 +41,16 @@ class DoublePendulum(PipelineEnv):
                             [17., 30., 9., 8.]])
 
         # feedback gains for OS controller
-        self._K_osc = jp.array([10.0])
+        self._K_p = 20.0 * jp.ones(3)
+        self._K_d = 10.0 * jp.ones(3)
 
         # desired position of the end effector
         self._ydes = 1.5
         self._zdes = 1.5
 
         # Friction parameters
-        self.friction_torque_coeff = 0.0
-        self.friction_static = 0.0
+        self.friction_torque_coeff = 5.0
+        self.friction_static = 10.0
 
     def reset(self, rng: jp.ndarray) -> State:
         """Resets the environment to an initial state."""
@@ -131,9 +132,11 @@ class DoublePendulum(PipelineEnv):
         )
 
     def calculate_friction(self, state: State) -> jp.ndarray:
+        # TODO: Make this piecewise. If below a certain threshold, use static, else use dynamic
         qd = state.pipeline_state.qd
+
         return jp.where(
-            qd != 0, -self.friction_torque_coeff * qd, self.friction_static
+            qd > 0.01, -self.friction_torque_coeff * qd, -self.friction_static
         )
 
     def approx_dynamics(self, obs: jp.ndarray, u: jp.ndarray,
@@ -165,17 +168,28 @@ class DoublePendulum(PipelineEnv):
 
     def osc_control(self, action: jp.ndarray, obs: jp.ndarray) -> jp.ndarray:
         """Compute control using the operational space control law.
-            Action is desired position. Assumes desired velocity is 0."""
+            Action is desired position. Position control only."""
+
+        # Compute the Jacobian, mass matrix, gravity torque, x and xd
         J = DoublePendulumUtils.compute_jacobian(obs[:2])
         M = DoublePendulumUtils.compute_os_mass_matrix(obs[:2])
         grav_torque = DoublePendulumUtils.compute_grav_torque(obs[:2])
         x, y, z = DoublePendulumUtils.end_effector_position(obs[:2])
+        xd, yd, zd = DoublePendulumUtils.end_effector_velocity(
+            obs[:2], obs[2:]
+        )
+
+        # Trip J and M for position control
+        M = M[:3, :3]
+        J = J[:3]
+
         return (
             jp.matmul(
                 J.T,
                 jp.matmul(
                     M,
-                    self._K_osc[0] * (action - jp.array([x, y, z, 0.0, 0.0, 0.0]))
+                    self._K_p * (action - jp.array([x, y, z]))
+                    + self._K_d * (-jp.array([xd, yd, zd])),
                 ),
             )
             + grav_torque

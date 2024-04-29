@@ -7,12 +7,12 @@ import matplotlib.pyplot as plt
 # jax.config.update("jax_disable_jit", True)
 
 # Sim parameters
-q_init = jp.array([jp.pi/4, 0.0])
+q_init = jp.array([-jp.pi, 0.0])
 qd_init = jp.array([0.0, 0.0])
-steps = 150
+steps = 400
 action = jp.array(
-    [0.0, 2.0 * jp.sin(jp.pi / 4), jp.sin(jp.pi / 4), 0.0, 0.0, 0.0]
-)  # 2 o'clock position
+    [0.0, 2.0, 0.0]
+)  # position control only
 
 # Setup Brax environment
 env_nf = DoublePendulum()
@@ -34,6 +34,12 @@ x_nf = DoublePendulumUtils.end_effector_position(
 x_yf = DoublePendulumUtils.end_effector_position(
     state_yf.pipeline_state.q
 )
+xd_nf = DoublePendulumUtils.end_effector_velocity(
+    state_nf.pipeline_state.q, state_nf.pipeline_state.qd
+)
+xd_yf = DoublePendulumUtils.end_effector_velocity(
+    state_yf.pipeline_state.q, state_yf.pipeline_state.qd
+)
 for i in range(steps):
     state_nf = step_nf_jitted(state_nf, action)
     state_yf = step_yf_jitted(state_yf, action)
@@ -51,35 +57,131 @@ for i in range(steps):
     x_yf = jp.vstack(
         (
             x_yf,
-            DoublePendulumUtils.end_effector_position(
+            jp.array(DoublePendulumUtils.end_effector_position(
                 state_yf.pipeline_state.q
+            )),
+        )
+    )
+
+    # Compute the end effector velocity
+    xd_nf = jp.vstack(
+        (
+            xd_nf,
+            DoublePendulumUtils.end_effector_velocity(
+                state_nf.pipeline_state.q, state_nf.pipeline_state.qd
+            ),
+        )
+    )
+
+    xd_yf = jp.vstack(
+        (
+            xd_yf,
+            DoublePendulumUtils.end_effector_velocity(
+                state_yf.pipeline_state.q, state_yf.pipeline_state.qd
             ),
         )
     )
 
     # Print
-    print(f"Step: {i}")
+    if i % 10 == 0:
+        print(f"Step: {i}")
 
 # Plot everything in subplots.
 # The first row of subplots shows the q values for the NF and YF environments.
 # The second row of subplots shows the qd values for the NF and YF environments.
-fig, axs = plt.subplots(3, 1)
+fig, axs = plt.subplots(4, 2)
 fig.suptitle("Double Pendulum Environment")
-axs[0].plot(x_nf[:, 0], label="NF")
-axs[0].plot(x_yf[:, 0], label="YF")
-axs[0].hlines(y=action[0], xmin=0, xmax=len(x_nf), colors='r', linestyles='--', label='Reference')
-axs[0].set_ylabel("x [m]")
-axs[0].legend()
-axs[1].plot(x_nf[:, 1], label="NF")
-axs[1].plot(x_yf[:, 1], label="YF")
-axs[1].hlines(y=action[1], xmin=0, xmax=len(x_nf), colors='r', linestyles='--', label='Reference')
-axs[1].set_ylabel("y [m]")
-axs[1].legend()
-axs[2].plot(x_nf[:, 2], label="NF")
-axs[2].plot(x_yf[:, 2], label="YF")
-axs[2].hlines(y=action[2], xmin=0, xmax=len(x_nf), colors='r', linestyles='--', label='Reference')
-axs[2].set_ylabel("z [m]")
-axs[2].legend()
+margin = 0.1
+
+axs[0, 0].plot(x_nf[:, 0], label="NF")
+axs[0, 0].plot(x_yf[:, 0], label="YF")
+axs[0, 0].hlines(
+    y=action[0],
+    xmin=0,
+    xmax=len(x_nf),
+    colors="r",
+    linestyles="--",
+    label="Reference",
+)
+axs[0, 0].set_ylabel("x [m]")
+axs[0, 0].set_ylim([-2-margin, 2+margin])
+
+axs[1, 0].plot(x_nf[:, 1], label="NF")
+axs[1, 0].plot(x_yf[:, 1], label="YF")
+axs[1, 0].hlines(
+    y=action[1],
+    xmin=0,
+    xmax=len(x_nf),
+    colors="r",
+    linestyles="--",
+    label="Reference",
+)
+axs[1, 0].set_ylabel("y [m]")
+axs[1, 0].set_ylim([-2-margin, 2+margin])
+
+axs[2, 0].plot(x_nf[:, 2], label="NF")
+axs[2, 0].plot(x_yf[:, 2], label="YF")
+axs[2, 0].hlines(
+    y=action[2],
+    xmin=0,
+    xmax=len(x_nf),
+    colors="r",
+    linestyles="--",
+    label="Reference",
+)
+axs[2, 0].set_ylabel("z [m]")
+axs[2, 0].set_xlabel("Steps")
+axs[2, 0].set_ylim([-2-margin, 2+margin])
+
+axs[0, 1].plot(xd_nf[:, 0], label="NF")
+axs[0, 1].plot(xd_yf[:, 0], label="YF")
+axs[0, 1].hlines(
+    y=action[3],
+    xmin=0,
+    xmax=len(x_nf),
+    colors="r",
+    linestyles="--",
+    label="Reference",
+)
+axs[0, 1].set_ylabel("xd [m/s]")
+
+axs[1, 1].plot(xd_nf[:, 1], label="NF")
+axs[1, 1].plot(xd_yf[:, 1], label="YF")
+axs[1, 1].hlines(
+    y=action[4],
+    xmin=0,
+    xmax=len(x_nf),
+    colors="r",
+    linestyles="--",
+    label="Reference",
+)
+axs[1, 1].set_ylabel("yd [m/s]")
+
+axs[2, 1].plot(xd_nf[:, 2], label="NF")
+axs[2, 1].plot(xd_yf[:, 2], label="YF")
+axs[2, 1].hlines(
+    y=action[5],
+    xmin=0,
+    xmax=len(x_nf),
+    colors="r",
+    linestyles="--",
+    label="Reference",
+)
+axs[2, 1].set_ylabel("zd [m/s]")
+axs[2, 1].set_xlabel("Steps")
+
+
+for i in range(3):
+    for j in range(2):
+        axs[i, j].margins(x=0, y=margin)
+
+# Create legend in the new subplot
+handles, labels = axs[0, 0].get_legend_handles_labels()
+fig.legend(handles, labels, loc='lower center', ncol=2)
+
+# Hide the new subplot
+axs[3, 0].axis('off')
+axs[3, 1].axis('off')
 
 plt.tight_layout()
 plt.savefig("figures/double_pend.png")

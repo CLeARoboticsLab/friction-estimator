@@ -40,7 +40,13 @@ class DoublePendulumUtils:
         y = -jp.sin(joint1_angle) - jp.sin(joint1_angle + joint2_angle)
         z = jp.cos(joint1_angle) + jp.cos(joint1_angle + joint2_angle)
 
-        return x, y, z
+        return jp.array([x, y, z])
+    
+    @staticmethod
+    def end_effector_velocity(q: jp.ndarray, qd: jp.ndarray) -> jp.ndarray:
+        """Returns the y, z velocity of the end effector in the global frame.
+        Assumes length of 1m for both links as defines in the urdf file"""
+        return jp.matmul(DoublePendulumUtils.compute_jacobian(q)[0:3], qd)
 
     @staticmethod
     def compute_jacobian(q: jp.ndarray) -> jp.ndarray:
@@ -52,7 +58,7 @@ class DoublePendulumUtils:
             [
                 [0.0, 0.0],
                 [-jp.cos(q[0]) - jp.cos(q[0] + q[1]), -jp.cos(q[0] + q[1])],
-                [jp.sin(q[0]) + jp.sin(q[0] + q[1]), jp.sin(q[0] + q[1])],
+                [-jp.sin(q[0]) - jp.sin(q[0] + q[1]), -jp.sin(q[0] + q[1])],
                 [1.0, 1.0],
                 [0.0, 0.0],
                 [0.0, 0.0],
@@ -86,7 +92,7 @@ class DoublePendulumUtils:
 
     @staticmethod
     def compute_os_mass_matrix(q: jp.ndarray) -> jp.ndarray:
-        """compute the mass matrix in the operational space"""
+        """compute the mass matrix in the operational space."""
         J = DoublePendulumUtils.compute_jacobian(q)
         link_mass_matrix = DoublePendulumUtils.compute_link_mass_matrix()
         M = DoublePendulumUtils.compute_full_mass_matrix(link_mass_matrix, J)
@@ -96,8 +102,27 @@ class DoublePendulumUtils:
     @staticmethod
     def compute_grav_torque(q: jp.ndarray) -> jp.ndarray:
         """compute the gravity torque"""
-        link_mass = 1.0
         g = 9.81
-        F_grav = jp.array([0.0, 0.0, -link_mass*g, 0.0, 0.0, 0.0])
-        J = DoublePendulumUtils.compute_jacobian(q)
-        return 2 * jp.matmul(J.T, F_grav)
+        F_grav = jp.array([0.0, 0.0, g])
+        J_0 = jp.array(
+            [
+                [0.0, 0.0],
+                [-1 / 2 * jp.cos(q[0]), 0],
+                [-1 / 2 * jp.sin(q[0]), 0],
+            ]
+        )
+        J_1 = jp.array(
+            [
+                [0.0, 0.0],
+                [
+                    -1 / 2 * jp.cos(q[0] + q[1]) - jp.cos(q[0]),
+                    -1 / 2 * jp.cos(q[0] + q[1]),
+                ],
+                [
+                    -1 / 2 * jp.sin(q[0] + q[1]) - jp.sin(q[0]),
+                    -1 / 2 * jp.sin(q[0] + q[1]),
+                ],
+            ]
+        )
+
+        return jp.matmul(J_0.T, F_grav) + jp.matmul(J_1.T, F_grav)
