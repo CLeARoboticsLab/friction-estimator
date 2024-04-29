@@ -42,7 +42,7 @@ class DoublePendulum(PipelineEnv):
 
         # feedback gains for OS controller
         self._K_p = 20.0 * jp.ones(3)
-        self._K_d = 10.0 * jp.ones(3)
+        self._K_d = 5.0 * jp.ones(3)
 
         # desired position of the end effector
         self._ydes = 1.5
@@ -50,7 +50,8 @@ class DoublePendulum(PipelineEnv):
 
         # Friction parameters
         self.friction_torque_coeff = 5.0
-        self.friction_static = 10.0
+        self.friction_threshold = 0.01
+        self.friction_static = 20.0
 
     def reset(self, rng: jp.ndarray) -> State:
         """Resets the environment to an initial state."""
@@ -132,11 +133,11 @@ class DoublePendulum(PipelineEnv):
         )
 
     def calculate_friction(self, state: State) -> jp.ndarray:
-        # TODO: Make this piecewise. If below a certain threshold, use static, else use dynamic
         qd = state.pipeline_state.qd
-
         return jp.where(
-            qd > 0.01, -self.friction_torque_coeff * qd, -self.friction_static
+            qd > self.friction_threshold,
+            -self.friction_torque_coeff * qd,
+            -self.friction_static,
         )
 
     def approx_dynamics(self, obs: jp.ndarray, u: jp.ndarray,
