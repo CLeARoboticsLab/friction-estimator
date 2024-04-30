@@ -43,8 +43,8 @@ num_epochs = 3000
 learning_rate = 1e-3
 log_interval = 10
 input_size = num_joints * 2
-hidden_layer_dim = 128
-hidden_layer_num = 2
+hidden_layer_dim = 256
+hidden_layer_num = 3
 output_size = num_joints
 seed = 0
 
@@ -148,7 +148,7 @@ data_train = jax.tree_util.tree_map(
     lambda x: x[: data_length - test_length], data
 )
 data_test = jax.tree_util.tree_map(
-    lambda x: x[data_length - test_length :], data
+    lambda x: x[data_length - test_length:], data
 )
 
 
