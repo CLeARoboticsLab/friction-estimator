@@ -27,49 +27,61 @@ class DoublePendulum(PipelineEnv):
 
         super().__init__(sys=sys, backend=backend, n_frames=n_frames, **kwargs)
 
-        """parameters for the system"""
-        # element-wise multiplication of the actions to scale them from [-1, 1]
-        # to [min, max] corrections to setpoints
-        self._action_weights = jp.array([1.0, 1.0, 1.0, 1.0])
-        self._normalize_reward = normalize_reward
-
-        # uncorrected setpoint for q1, q2, q1d, q2d (pendulum is straight up)
-        self._setpoint = jp.array([0.0, 0.0, 0.0, 0.0])
-
-        # feedback gains for the low-level controller
-        self._K = jp.array([[64., 17., 25., 9.],
-                            [17., 30., 9., 8.]])
+        """parameters for the system"""       
 
         # feedback gains for OS controller
-        self._K_p = 20.0 * jp.ones(3)
-        self._K_d = 5.0 * jp.ones(3)
+        self._K_p = 15.0 * jp.ones(3)
+        self._K_d = 1.0 * jp.ones(3)
+
+        # Friction parameters
+        self.friction_torque_coeff = 1.0
+        self.friction_threshold = 0.1
+        self.friction_static = 30.0
+
+        # Feasible space for joint space
+        # Same for both joints
+        self.q_min = -jp.pi
+        self.q_max = -self.q_min
+        self.qd_min = -20.0
+        self.qd_max = -self.qd_min
+
+        # --- Old parameters ---
+        # TODO: Remove these and cleanup the code
 
         # desired position of the end effector
         self._ydes = 1.5
         self._zdes = 1.5
 
-        # Friction parameters
-        self.friction_torque_coeff = 5.0
-        self.friction_threshold = 0.01
-        self.friction_static = 20.0
+        # feedback gains for the low-level controller
+        self._K = jp.array([[64., 17., 25., 9.],
+                            [17., 30., 9., 8.]])
+        
+        # uncorrected setpoint for q1, q2, q1d, q2d (pendulum is straight up)
+        self._setpoint = jp.array([0.0, 0.0, 0.0, 0.0])
+
+        # element-wise multiplication of the actions to scale them from [-1, 1]
+        # to [min, max] corrections to setpoints
+        self._action_weights = jp.array([1.0, 1.0, 1.0, 1.0])
+        self._normalize_reward = normalize_reward
+
+        
 
     def reset(self, rng: jp.ndarray) -> State:
         """Resets the environment to an initial state."""
         rng, rng1, rng2 = jax.random.split(rng, 3)
 
         q = self.sys.init_q + jax.random.uniform(
-            rng1, (self.sys.q_size(),), minval=-jp.pi, maxval=jp.pi
+            rng1, (self.sys.q_size(),), minval=self.q_min, maxval=self.q_max
         )
         qd = jax.random.uniform(
-            rng2, (self.sys.qd_size(),), minval=-0.1, maxval=0.1
+            rng2, (self.sys.qd_size(),), minval=self.qd_min, maxval=self.qd_max
         )
         pipeline_state = self.pipeline_init(q, qd)
         obs = self._get_obs(pipeline_state)
         reward, done = jp.zeros(2)
         metrics = {}
-        u = jp.zeros(self.sys.act_size())
 
-        return State(pipeline_state, obs, reward, done, metrics, u=u)
+        return State(pipeline_state, obs, reward, done, metrics)
 
     def set_state(self, q: jp.ndarray, qd: jp.ndarray) -> State:
         """Sets the state of the environment."""
@@ -113,7 +125,7 @@ class DoublePendulum(PipelineEnv):
         u = self.osc_control(action, prev_obs)
 
         # Add friction
-        friction = self.calculate_friction(state)
+        friction = self.calculate_friction(state, u)
 
         # take an environment step with low level control
         pipeline_state = self.pipeline_step(state.pipeline_state, u + friction)
@@ -131,13 +143,38 @@ class DoublePendulum(PipelineEnv):
         return state.replace(
             pipeline_state=pipeline_state, obs=obs, reward=reward, done=done
         )
+      
+    def step_directly(self, state: State, action: jp.ndarray) -> State:
+        """Bypass controller. Actions assumed to be torques"""
+        # translate state to observations
+        prev_obs = self._get_obs(state.pipeline_state)
 
-    def calculate_friction(self, state: State) -> jp.ndarray:
+        # Assume action is torque
+        u = action
+
+        # take an environment step with low level control
+        pipeline_state = self.pipeline_step(state.pipeline_state, u)
+
+        # get new observations
+        obs = self._get_obs(pipeline_state)
+
+        # compute reward
+        reward, _ = self.compute_reward(obs, prev_obs, u, action)
+
+        # compute dones for resets; here we never reset
+        done = jp.zeros_like(reward)
+
+        return state.replace(
+            pipeline_state=pipeline_state, obs=obs, reward=reward, done=done
+        )
+
+    def calculate_friction(self, state: State, u: jp.ndarray) -> jp.ndarray:
         qd = state.pipeline_state.qd
+        t = (qd, u)
         return jp.where(
-            qd > self.friction_threshold,
-            -self.friction_torque_coeff * qd,
-            -self.friction_static,
+            jp.abs(t[0]) < 2.0,
+            -jp.sign(qd) * t[1],
+            0.0
         )
 
     def approx_dynamics(self, obs: jp.ndarray, u: jp.ndarray,
