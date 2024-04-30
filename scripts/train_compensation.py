@@ -9,13 +9,14 @@ from brax.training import networks
 from brax.training.types import Params
 from brax.training.types import PRNGKey
 from brax.envs import State
-from brax.envs.panda import Panda
+from brax.envs.double_pendulum import DoublePendulum
 from jax import numpy as jp
 from jax.config import config
+from flax import serialization
 
 # Debugging utilities
 # jax.config.update("jax_disable_jit", True)
-config.update("jax_enable_x64", True)
+# config.update("jax_enable_x64", True)
 
 
 # Define the data class
@@ -34,22 +35,23 @@ with open("data/data.pkl", "rb") as f:
     data = pickle.load(f)
 
 # Training parameters
-num_joints = 7
-batch_size = 1024
+num_joints = 2
+batch_size = 128
 data_length = data.torque.shape[0]
 test_length = 1024
-num_epochs = 100
+num_epochs = 3000
 learning_rate = 1e-3
 log_interval = 10
 input_size = num_joints * 2
-hidden_layer_dim = 256
-hidden_layer_num = 3
+hidden_layer_dim = 128
+hidden_layer_num = 2
 output_size = num_joints
 seed = 0
 
 # Define the network
 network = networks.MLP(
-    layer_sizes=([hidden_layer_dim] * hidden_layer_num + [output_size])
+    layer_sizes=([hidden_layer_dim] * hidden_layer_num + [output_size]),
+    activation=flax.linen.gelu
 )
 optimizer = optax.adam(learning_rate)
 key = jax.random.key(seed)
@@ -83,9 +85,8 @@ def _init_training_state(
 
 # Setup Brax environment
 seed = 0
-env_brax = Panda()
-env_reset_jitted = jax.jit(env_brax.reset)
-env_step_jitted = jax.jit(env_brax.step)
+env_brax = DoublePendulum()
+env_step_jitted = jax.jit(env_brax.step_directly)
 
 
 # Loss function
@@ -200,7 +201,7 @@ start_time = time.time()
 for epoch in range(num_epochs):
     start_time_epoch = time.time()
     # Train
-    key, key_init = jax.random.split(key_init)
+    key, key_init = jax.random.split(key_init, 2)
     training_state, epoch_loss = train_epoch(training_state, data_train, key)
     losses.append(epoch_loss)
 
@@ -213,30 +214,24 @@ for epoch in range(num_epochs):
     )
 print(f"Training finished. Time taken: {time.time() - start_time}")
 
-# # Plot the losses
-# plt.figure()
-# plt.plot(losses)
-# plt.xlabel("Epoch")
-# plt.ylabel("Loss")
-# plt.yscale("log")  # Set y-axis to logarithmic scale
-# plt.title("Training Loss")
-# plt.savefig("figures/training_loss.png")
-
-# # Make new plot and save evaluation loss
-# plt.figure()
-# plt.plot(eval_losses)
-# plt.xlabel("Epoch")
-# plt.ylabel("Loss")
-# plt.title("Evaluation Loss")
-# plt.savefig("figures/evaluation_loss.png")
-
 # Plot validation and training loss in the same plot
 plt.figure()
-plt.plot(losses, label="Training Loss")
-plt.plot(eval_losses, label="Evaluation Loss")
+plt.plot(losses[1:], label="Training Loss")
+plt.plot(eval_losses[1:], label="Evaluation Loss")
 plt.xlabel("Epoch")
 plt.ylabel("Loss")
 plt.yscale("log")  # Set y-axis to logarithmic scale
 plt.legend()
-plt.title("Training and Evaluation Loss")
+plt.title(
+    f"Training and Evaluation Loss\n"
+    f"LR: {learning_rate}, "
+    f"Batch Size: {batch_size}, "
+    f"Hidden Layers: {hidden_layer_num}, "
+    f"Layer Dims: {hidden_layer_dim}"
+)
 plt.savefig("figures/training_and_evaluation_loss.png")
+
+# Save model
+bytes_output = serialization.to_bytes(training_state.params)
+with open('data/model_params.bin', 'wb') as f:
+    f.write(bytes_output)
