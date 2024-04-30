@@ -21,9 +21,9 @@ config.update("jax_enable_x64", True)
 # -----------------------
 # --- Sim Parameters ----
 # -----------------------
-num_steps = 2 ** 14
-friction_torque_coeff = 10.
-friction_static = 1.0
+num_steps = 2 ** 15
+friction_torque_coeff = 100.0
+friction_static = 10.0
 torque_logging_interval = 100
 num_joints = 7
 key = jax.random.key(0)
