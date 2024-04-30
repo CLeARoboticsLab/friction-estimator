@@ -7,6 +7,7 @@ import time
 import pickle
 from jax.config import config
 
+import matplotlib.pyplot as plt
 
 # -----------------------
 # --- Debug Utils -------
@@ -95,3 +96,38 @@ print(f"Time taken: {time.time() - start_time}"),
 # Save data
 with open("data/data.pkl", "wb") as f:
     pickle.dump(data, f)
+
+# ----------------------------
+# --- Plot data  -------------
+# ----------------------------
+
+# Plot actions to ensure proper distribution
+action_samples = jax.vmap(sample_os_action)(key_states)
+
+plt.figure()
+plt.scatter(action_samples[:, 1], action_samples[:, 2])
+plt.title("Action samples")
+plt.xlabel("x [m]")
+plt.ylabel("y [m]")
+plt.axis("equal")
+plt.savefig("figures/samples_actions.png")
+
+# Plot sampled init states to ensure proper distribution
+q_samples = data.init_state.pipeline_state.q
+qd_samples = data.init_state.pipeline_state.qd
+
+fig, axs = plt.subplots(1, 2, figsize=(6.0, 3.0))
+axs[0].scatter(q_samples[:, 0], q_samples[:, 1])
+axs[0].set_title("q samples")
+axs[0].set_xlabel("q1 [rad]")
+axs[0].set_ylabel("q2 [rad]")
+axs[0].axis("equal")
+
+axs[1].scatter(qd_samples[:, 0], qd_samples[:, 1])
+axs[1].set_title("qd samples")
+axs[1].set_xlabel("qd1 [rad/s]")
+axs[1].set_ylabel("qd2 [rad/s]")
+axs[1].axis("equal")
+
+plt.tight_layout()
+plt.savefig("figures/samples_states.png")
