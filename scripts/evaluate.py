@@ -16,6 +16,7 @@ from flax import serialization
 import imageio
 import cv2
 
+# jax.config.update("jax_disable_jit", True)
 
 # -----------------------
 # --- Sim Parameters ----
@@ -32,7 +33,7 @@ seed = 0
 friction_torque_coeff = 10.
 friction_static = 0.05
 
-num_steps = 100
+num_steps = 200
 torque_logging_interval = 10
 key = jax.random.key(0)
 key_states = jax.random.split(key, num=num_steps)
@@ -98,11 +99,12 @@ env_config["robots"]
 env_config["camera_names"] = ["sideview"]
 env_config["camera_heights"] = 480
 env_config["camera_widths"] = 480
-env_config["control_freq"] = 10
+env_config["control_freq"] = 500
 env_config["has_renderer"] = False
 env_config["has_offscreen_renderer"] = True
 env_config["ignore_done"] = True
 env_config["use_camera_obs"] = True
+env_config["hard_reset"] = False
 
 controller_config = suite.load_controller_config(
     default_controller="OSC_POSITION"
@@ -122,11 +124,11 @@ obs_vanilla = env_rs_vanilla.reset()
 obs_brax = env_rs_brax.reset()
 
 # Set initial robosuite state
-env_rs_vanilla.sim.data.qpos[env_rs_vanilla.robots[0].joint_indexes] = initial_q
-env_rs_vanilla.sim.data.qvel[env_rs_vanilla.robots[0].joint_indexes] = initial_qd
+env_rs_vanilla.sim.data.qpos[env_rs_vanilla.robots[0].joint_indexes] = copy.deepcopy(initial_q)
+env_rs_vanilla.sim.data.qvel[env_rs_vanilla.robots[0].joint_indexes] = copy.deepcopy(initial_qd)
 
-env_rs_brax.sim.data.qpos[env_rs_brax.robots[0].joint_indexes] = initial_q
-env_rs_brax.sim.data.qvel[env_rs_brax.robots[0].joint_indexes] = initial_qd
+env_rs_brax.sim.data.qpos[env_rs_brax.robots[0].joint_indexes] = copy.deepcopy(initial_q)
+env_rs_brax.sim.data.qvel[env_rs_brax.robots[0].joint_indexes] = copy.deepcopy(initial_qd)
 
 print(f"Robosuite environment loaded. Time taken: {time.time() - start_time}")
 
@@ -143,18 +145,18 @@ env_brax = Panda()
 env_reset_jitted = jax.jit(env_brax.reset)
 env_set_state_jitted = jax.jit(env_brax.set_state)
 env_step_jitted = jax.jit(env_brax.step)
+# env_step_jitted = env_brax.step
+
 
 # Set initial state
 state_brax = env_set_state_jitted(initial_q, initial_qd)
-
-# Set integrator
-
 
 print(f"Brax environment loaded. Time taken: {time.time() - start_time}")
 
 # ----------------------------
 # --- Run tracking -----------
 # ----------------------------
+
 print("Testing tracking...")
 start_time = time.time()
 
@@ -162,7 +164,7 @@ start_time = time.time()
 action = np.zeros(3 + 1)
 cartesian_perturbation = np.zeros(3)
 cartesian_perturbation[perturbation_index] = perturbation_amount
-action[0:3] = cartesian_perturbation
+# action[0:3] = cartesian_perturbation
 
 # Run the simulation
 ee_pos_vanilla = []
@@ -172,7 +174,11 @@ frames_brax = []
 
 for i in range(num_steps):
 
-    # Save end effecttor position within robosuite
+    # Step robosuite and get control torques
+    obs_vanilla, _, _, _ = env_rs_vanilla.step(action)
+    obs_brax, _, _, _ = env_rs_brax.step(action)
+
+    # Record end effector position
     ee_pos_vanilla.append(obs_vanilla['robot0_eef_pos'])
     ee_pos_brax.append(obs_brax['robot0_eef_pos'])
 
@@ -180,26 +186,32 @@ for i in range(num_steps):
     frames_vanilla.append(obs_vanilla["sideview_image"])
     frames_brax.append(obs_brax["sideview_image"])
 
-    # Step robosuite and get control torques
-    obs_vanilla, _, _, _ = env_rs_vanilla.step(action)
-    obs_brax, _, _, _ = env_rs_brax.step(action)
-
     # Record torques
     torques_control_vanilla = env_rs_vanilla.sim.data.ctrl
     torques_control_brax = env_rs_brax.sim.data.ctrl
 
+    # Compute friction torques
+    # friction_torques = compute_friction_torques(
+    #     env_rs_brax.sim.data.qpos[env_rs_vanilla.robots[0].joint_indexes],
+    #     env_rs_brax.sim.data.qvel[env_rs_vanilla.robots[0].joint_indexes],
+    # )
+
     # Step brax
     state_brax = env_step_jitted(
-        state_brax, torques_control_brax[0:num_joints]
+        state_brax, torques_control_brax[env_rs_vanilla.robots[0].joint_indexes]
     )
 
-    # Set brax robosuite env to the same state as stepped brax
-    # env_rs_brax.sim.data.qpos[env_rs_brax.robots[0].joint_indexes] = (
-    #     state_brax.pipeline_state.q
-    # )
-    # env_rs_brax.sim.data.qvel[env_rs_brax.robots[0].joint_indexes] = (
-    #     state_brax.pipeline_state.qd
-    # )
+    # Compute norm of difference between brax and robosuite states
+    difference = np.linalg.norm(
+        state_brax.pipeline_state.q - env_rs_brax.sim.data.qpos[env_rs_vanilla.robots[0].joint_indexes]
+    )
+    print(f"Step {i} of {num_steps}. Norm of difference: {difference}")
+
+    # Set robosuite brax to the same state as brax
+    env_rs_brax.reset()
+    env_rs_brax.sim.data.qpos[env_rs_brax.robots[0].joint_indexes] = copy.deepcopy(state_brax.pipeline_state.q)
+    env_rs_brax.sim.data.qvel[env_rs_brax.robots[0].joint_indexes] = copy.deepcopy(state_brax.pipeline_state.qd)
+    env_rs_brax.sim.data.qacc[env_rs_brax.robots[0].joint_indexes] = copy.deepcopy(state_brax.pipeline_state.qdd)
 
     # Log
     if i % torque_logging_interval == 0:
