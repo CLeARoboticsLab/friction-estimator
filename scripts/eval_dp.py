@@ -1,16 +1,19 @@
 import jax
+import flax
+import time
 from brax.envs.double_pendulum import DoublePendulum
 from brax.robots.double_pendulum.utils import DoublePendulumUtils
 from jax import numpy as jp
 import matplotlib.pyplot as plt
+from brax.envs import State
 
 # jax.config.update("jax_disable_jit", True)
 
 # Sim parameters
 q_init = jp.array([-jp.pi, 0.0])
 qd_init = jp.array([0.0, 0.0])
-steps = 200
-action = jp.array([0.0, 2.0, 0.0])  # position control only
+steps = 1000
+action = jp.array([0.0, 1.0, 1.0])  # position control only
 plot_start = 0
 
 # Setup Brax environment
@@ -22,128 +25,91 @@ step_yf_jitted = jax.jit(env_yf.step_with_friction)
 set_nf_jitted = jax.jit(env_nf.set_state)
 set_yf_jitted = jax.jit(env_yf.set_state)
 
+
+@flax.struct.dataclass
+class MyData:
+    init_state: State
+    new_state: State
+    action: jp.ndarray
+    x: jp.ndarray
+    xd: jp.ndarray
+    x_error: jp.float32
+    xd_error: jp.float32
+
+
+def make_trajectory_step(action, step_fn):
+    def trajectory_step(carry, in_element):
+        init_state = carry
+        x = DoublePendulumUtils.end_effector_position(
+            init_state.pipeline_state.q
+        )
+        xd = DoublePendulumUtils.end_effector_velocity(
+            init_state.pipeline_state.q, init_state.pipeline_state.qd
+        )
+        x_error = jp.linalg.norm(x - action)
+        xd_error = jp.linalg.norm(xd)
+        new_state = step_fn(init_state, action)
+        return new_state, MyData(
+            init_state, new_state, action, x, xd, x_error, xd_error
+        )
+
+    return trajectory_step
+
+
+trajectory_step_nf = make_trajectory_step(action, step_nf_jitted)
+trajectory_step_yf = make_trajectory_step(action, step_yf_jitted)
+
 # Reset the environment
 state_nf = set_nf_jitted(q_init, qd_init)
 state_yf = set_yf_jitted(q_init, qd_init)
 
-# Save q and qd
-x_nf = DoublePendulumUtils.end_effector_position(state_nf.pipeline_state.q)
-x_yf = DoublePendulumUtils.end_effector_position(state_yf.pipeline_state.q)
-xd_nf = DoublePendulumUtils.end_effector_velocity(
-    state_nf.pipeline_state.q, state_nf.pipeline_state.qd
+# Run the simulation
+print("Generating trajectory")
+start_time = time.time()
+
+_, trajectory_nf = jax.lax.scan(
+    trajectory_step_nf, state_nf, (), steps
 )
-xd_yf = DoublePendulumUtils.end_effector_velocity(
-    state_yf.pipeline_state.q, state_yf.pipeline_state.qd
+_, trajectory_yf = jax.lax.scan(
+    trajectory_step_yf, state_yf, (), steps
 )
-x_error_nf = jp.linalg.norm(x_nf - action)
-x_error_yf = jp.linalg.norm(x_yf - action)
-xd_error_nf = jp.linalg.norm(xd_nf)
-xd_error_yf = jp.linalg.norm(xd_yf)
-for i in range(steps):
-    state_nf = step_nf_jitted(state_nf, action)
-    state_yf = step_yf_jitted(state_yf, action)
 
-    # Compute the end effector position
-    x_nf = jp.vstack(
-        (
-            x_nf,
-            DoublePendulumUtils.end_effector_position(
-                state_nf.pipeline_state.q
-            ),
-        )
-    )
+print("Trajectory generated.")
+print(f"Time taken: {time.time() - start_time}")
 
-    x_yf = jp.vstack(
-        (
-            x_yf,
-            jp.array(
-                DoublePendulumUtils.end_effector_position(
-                    state_yf.pipeline_state.q
-                )
-            ),
-        )
-    )
+# Plot everything
+x_nf = trajectory_nf.x
+x_yf = trajectory_yf.x
+xd_nf = trajectory_nf.xd
+xd_yf = trajectory_yf.xd
+x_error_nf = trajectory_nf.x_error
+x_error_yf = trajectory_yf.x_error
+xd_error_nf = trajectory_nf.xd_error
+xd_error_yf = trajectory_yf.xd_error
+q_nf = trajectory_nf.init_state.pipeline_state.q
+q_yf = trajectory_yf.init_state.pipeline_state.q
+qd_nf = trajectory_nf.init_state.pipeline_state.qd
+qd_yf = trajectory_yf.init_state.pipeline_state.qd
 
-    # Compute position error
-    x_error_nf = jp.vstack(
-        (
-            x_error_nf,
-            jp.linalg.norm(x_nf[-1] - action),
-        )
-    )
-    x_error_yf = jp.vstack(
-        (
-            x_error_yf,
-            jp.linalg.norm(x_yf[-1] - action),
-        )
-    )
-
-    # Compute velocity error
-    xd_error_nf = jp.vstack(
-        (
-            xd_error_nf,
-            jp.linalg.norm(
-                DoublePendulumUtils.end_effector_velocity(
-                    state_nf.pipeline_state.q, state_nf.pipeline_state.qd
-                )
-            ),
-        )
-    )
-    xd_error_yf = jp.vstack(
-        (
-            xd_error_yf,
-            jp.linalg.norm(
-                DoublePendulumUtils.end_effector_velocity(
-                    state_yf.pipeline_state.q, state_yf.pipeline_state.qd
-                )
-            ),
-        )
-    )
-
-    # Compute the end effector velocity
-    xd_nf = jp.vstack(
-        (
-            xd_nf,
-            DoublePendulumUtils.end_effector_velocity(
-                state_nf.pipeline_state.q, state_nf.pipeline_state.qd
-            ),
-        )
-    )
-
-    xd_yf = jp.vstack(
-        (
-            xd_yf,
-            DoublePendulumUtils.end_effector_velocity(
-                state_yf.pipeline_state.q, state_yf.pipeline_state.qd
-            ),
-        )
-    )
-
-    # Print
-    if i % 10 == 0:
-        print(f"Step: {i}")
-
-# Plot everything in subplots.
-# The first row of subplots shows the q values for the NF and YF environments.
-# The second row of subplots shows the qd values for the NF and YF environments.
 fig, axs = plt.subplots(5, 2, figsize=(7.5, 7.5))
 fig.suptitle("Double Pendulum State")
 margin = 0.1
 
-# State
-axs[0, 0].plot(x_nf[:, 0], label="NF")
-axs[0, 0].plot(x_yf[:, 0], label="YF")
-axs[0, 0].hlines(
-    y=action[0],
-    xmin=0,
-    xmax=len(x_nf),
-    colors="r",
-    linestyles="--",
-    label="Reference",
-)
-axs[0, 0].set_ylabel("x [m]")
-axs[0, 0].set_ylim([-2 - margin, 2 + margin])
+# Joint state
+axs[0, 0].plot(q_nf[:, 0], color="tab:blue", linestyle="dashed")
+axs[0, 0].plot(q_nf[:, 1], color="tab:blue", linestyle="dashdot")
+axs[0, 0].plot(q_yf[:, 0], color="tab:orange", linestyle="dashed")
+axs[0, 0].plot(q_yf[:, 1], color="tab:orange", linestyle="dashdot")
+axs[0, 0].set_ylabel("q [rad]")
+# axs[0, 0].set_ylim([-2*jp.pi - margin, 2*jp.pi + margin])
 
+axs[0, 1].plot(qd_nf[:, 0], color="tab:blue", linestyle="dashed")
+axs[0, 1].plot(qd_nf[:, 1], color="tab:blue", linestyle="dashdot")
+axs[0, 1].plot(qd_yf[:, 0], color="tab:orange", linestyle="dashed")
+axs[0, 1].plot(qd_yf[:, 1], color="tab:orange", linestyle="dashdot")
+axs[0, 1].set_ylabel("qd [rad/s]")
+
+# End effector state
 axs[1, 0].plot(x_nf[:, 1], label="NF")
 axs[1, 0].plot(x_yf[:, 1], label="YF")
 axs[1, 0].hlines(
@@ -151,7 +117,7 @@ axs[1, 0].hlines(
     xmin=0,
     xmax=len(x_nf),
     colors="r",
-    linestyles="--",
+    linestyles="dotted",
     label="Reference",
 )
 axs[1, 0].set_ylabel("y [m]")
@@ -164,33 +130,21 @@ axs[2, 0].hlines(
     xmin=0,
     xmax=len(x_nf),
     colors="r",
-    linestyles="--",
+    linestyles="dotted",
     label="Reference",
 )
 axs[2, 0].set_ylabel("z [m]")
 axs[2, 0].set_xlabel("Steps")
 axs[2, 0].set_ylim([-2 - margin, 2 + margin])
 
-axs[0, 1].plot(xd_nf[:, 0], label="NF")
-axs[0, 1].plot(xd_yf[:, 0], label="YF")
-axs[0, 1].hlines(
-    y=action[3],
-    xmin=0,
-    xmax=len(x_nf),
-    colors="r",
-    linestyles="--",
-    label="Reference",
-)
-axs[0, 1].set_ylabel("xd [m/s]")
-
 axs[1, 1].plot(xd_nf[:, 1], label="NF")
 axs[1, 1].plot(xd_yf[:, 1], label="YF")
 axs[1, 1].hlines(
-    y=action[4],
+    y=0.0,
     xmin=0,
     xmax=len(x_nf),
     colors="r",
-    linestyles="--",
+    linestyles="dotted",
     label="Reference",
 )
 axs[1, 1].set_ylabel("yd [m/s]")
@@ -198,11 +152,11 @@ axs[1, 1].set_ylabel("yd [m/s]")
 axs[2, 1].plot(xd_nf[:, 2], label="NF")
 axs[2, 1].plot(xd_yf[:, 2], label="YF")
 axs[2, 1].hlines(
-    y=action[5],
+    y=0.0,
     xmin=0,
     xmax=len(x_nf),
     colors="r",
-    linestyles="--",
+    linestyles="dotted",
     label="Reference",
 )
 axs[2, 1].set_ylabel("zd [m/s]")
@@ -212,13 +166,13 @@ axs[3, 0].plot(x_error_nf, label="NF")
 axs[3, 0].plot(x_error_yf, label="YF")
 axs[3, 0].set_ylabel("Pos. error [m]")
 axs[3, 0].set_xlabel("Steps")
-axs[3, 0].set_ylim(bottom=0)
+axs[3, 0].set_ylim(bottom=0 - margin)
 
 axs[3, 1].plot(xd_error_nf, label="NF")
 axs[3, 1].plot(xd_error_yf, label="YF")
 axs[3, 1].set_ylabel("Vel. error [m/s]")
 axs[3, 1].set_xlabel("Steps")
-axs[3, 1].set_ylim(bottom=0)
+axs[3, 1].set_ylim(bottom=0 - margin)
 
 # Set x-axis limits
 axs[0, 0].set_xlim(left=plot_start)
@@ -231,7 +185,7 @@ axs[3, 0].set_xlim(left=plot_start)
 axs[3, 1].set_xlim(left=plot_start)
 
 # Create legend in the new subplot
-handles, labels = axs[0, 0].get_legend_handles_labels()
+handles, labels = axs[1, 0].get_legend_handles_labels()
 fig.legend(handles, labels, loc="lower center", ncol=2)
 
 # Hide the new subplot
