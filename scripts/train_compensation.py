@@ -36,17 +36,21 @@ with open("data/data.pkl", "rb") as f:
 
 # Training parameters
 num_joints = 2
-batch_size = 128
+batch_size = 256
 data_length = data.torque.shape[0]
 test_length = 1024
-num_epochs = 3000
+num_epochs = 200
 learning_rate = 1e-3
 log_interval = 10
 input_size = num_joints * 2
 hidden_layer_dim = 256
-hidden_layer_num = 3
+hidden_layer_num = 2
 output_size = num_joints
 seed = 0
+
+# Setup Brax environment
+env_brax = DoublePendulum()
+env_step_jitted = jax.jit(env_brax.step_directly)
 
 # Define the network
 network = networks.MLP(
@@ -83,21 +87,32 @@ def _init_training_state(
     return training_state
 
 
-# Setup Brax environment
-seed = 0
-env_brax = DoublePendulum()
-env_step_jitted = jax.jit(env_brax.step_directly)
+# Normalization wrapper
+# Normalizes inputs so they're all within the range [0, 1]
+# Note that the first 2 elements of the input are the joint angles and will be normalized differently
+def normalize_joint_state(joint_state):
+    normalization_factors = jp.concatenate(
+        (
+            jp.tile(2 * env_brax.q_max, (num_joints,)),
+            jp.tile(2 * env_brax.qd_max, (num_joints,)),
+        )
+    )
+    return jax.tree_util.tree_map(
+        lambda state: state / normalization_factors + 0.5, joint_state
+    )
+
+
+def compute_friction_torques(params, obs):
+    obs = normalize_joint_state(obs)
+    return network.apply(params, obs)
 
 
 # Loss function
 def loss_fn(params, data):
 
-    initial_pose = jp.concatenate(
-        [data.init_state.pipeline_state.q, data.init_state.pipeline_state.qd],
-        axis=1,
-    )
-    torques_friction = network.apply(
-        params, initial_pose
+    # Compute the friction torques
+    torques_friction = compute_friction_torques(
+        params, data.init_state.obs
     )  # i/o both (batch_size, num_joints)
 
     # Compute the next state
@@ -156,12 +171,9 @@ data_test = jax.tree_util.tree_map(
 # Requires knowledge of friction
 def eval_loss_fn(params, data):
 
-    initial_pose = jp.concatenate(
-        [data.init_state.pipeline_state.q, data.init_state.pipeline_state.qd],
-        axis=1,
-    )
-    torques_friction = network.apply(
-        params, initial_pose
+    # Compute the friction torques
+    torques_friction = compute_friction_torques(
+        params, data.init_state.obs
     )  # i/o both (batch_size, num_joints)
 
     # Compute the next state
