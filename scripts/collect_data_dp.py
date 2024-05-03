@@ -21,14 +21,15 @@ import matplotlib.pyplot as plt
 # -----------------------
 
 # Collection limits
-num_steps = 2**15
+num_steps = 2**16
 torque_logging_interval = 100
 num_joints = 2
 link_length = 1.0
 seed = 0
 
 # Control params
-torque_lims = jp.array([-100.0, 100.0])
+torque_max = 100.0
+torque_lims = jp.array([-torque_max, torque_max])
 
 # -----------------------
 # --- Brax stuff --------
@@ -39,7 +40,7 @@ start_time = time.time()
 
 # Setup Brax environment
 env = DoublePendulum()  # 2D double pendulum rotating around x-axis
-step_jitted = jax.jit(env.step_with_friction)
+step_jitted = jax.jit(env.step_directly_with_friction)
 reset_jitted = jax.jit(env.reset)
 
 print("Brax environment loaded.")
@@ -73,18 +74,14 @@ def sample_os_action(key):
 # Data collection function
 def make_data(key):
     # Split key
-    rng1, rng2, rng3 = jax.random.split(key, num=3)
+    rng1, rng2 = jax.random.split(key, num=2)
 
     # Sample init brax state and compute friction torques
     init_state = reset_jitted(rng1)
 
-    # Sample action
-    action = sample_os_action(rng2)
-
-    # Compute torques TODO: save these in the brax state
-    # torque = env.osc_control(action, env._get_obs(init_state.pipeline_state))
+    # Sample random torque
     torque = jax.random.uniform(
-                rng3,
+                rng2,
                 (num_joints,),
                 minval=torque_lims[0],
                 maxval=torque_lims[1],
@@ -92,9 +89,14 @@ def make_data(key):
     friction = env.calculate_friction(init_state, torque)
 
     # Step in both environments
-    next_state = step_jitted(init_state, action)
+    next_state = step_jitted(init_state, torque + friction)
 
-    return MyData(init_state, torque, friction, next_state)
+    return MyData(
+        init_state,
+        torque,
+        friction,
+        next_state,
+    )
 
 
 # Collect data
@@ -157,3 +159,20 @@ plt.xlabel("T1 [Nm]")
 plt.ylabel("T2 [Nm]")
 plt.axis("equal")
 plt.savefig("figures/samples_torques.png")
+
+
+# Plot histogram of joint angles and velocities
+# Should be four separate histograms
+plt.figure()
+
+fig, axs = plt.subplots(2, 2, figsize=(6.0, 6.0))
+axs[0, 0].hist(q_samples[:, 0], bins=50)
+axs[0, 0].set_title("q1 [rad]")
+axs[0, 1].hist(q_samples[:, 1], bins=50)
+axs[0, 1].set_title("q2 [rad]")
+axs[1, 0].hist(qd_samples[:, 0], bins=50)
+axs[1, 0].set_title("qd1 [rad/s]")
+axs[1, 1].hist(qd_samples[:, 1], bins=50)
+axs[1, 1].set_title("qd2 [rad/s]")
+plt.tight_layout()
+plt.savefig("figures/histograms_states.png")
