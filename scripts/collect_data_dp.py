@@ -19,11 +19,16 @@ import matplotlib.pyplot as plt
 # -----------------------
 # --- Sim Parameters ----
 # -----------------------
-num_steps = 2 ** 15
+
+# Collection limits
+num_steps = 2**15
 torque_logging_interval = 100
 num_joints = 2
 link_length = 1.0
 seed = 0
+
+# Control params
+torque_lims = jp.array([-100.0, 100.0])
 
 # -----------------------
 # --- Brax stuff --------
@@ -44,6 +49,7 @@ print(f"Time taken: {time.time() - start_time}")
 # ----------------------------
 # --- Collect data  ----------
 # ----------------------------
+
 
 # Data class
 @flax.struct.dataclass
@@ -66,14 +72,23 @@ def sample_os_action(key):
 
 # Data collection function
 def make_data(key):
+    # Split key
+    rng1, rng2, rng3 = jax.random.split(key, num=3)
+
     # Sample init brax state and compute friction torques
-    init_state = reset_jitted(key)
+    init_state = reset_jitted(rng1)
 
     # Sample action
-    action = sample_os_action(key)
+    action = sample_os_action(rng2)
 
     # Compute torques TODO: save these in the brax state
-    torque = env.osc_control(action, env._get_obs(init_state.pipeline_state))
+    # torque = env.osc_control(action, env._get_obs(init_state.pipeline_state))
+    torque = jax.random.uniform(
+                rng3,
+                (num_joints,),
+                minval=torque_lims[0],
+                maxval=torque_lims[1],
+            )
     friction = env.calculate_friction(init_state, torque)
 
     # Step in both environments
@@ -131,3 +146,14 @@ axs[1].axis("equal")
 
 plt.tight_layout()
 plt.savefig("figures/samples_states.png")
+
+# Plot torques to ensure proper distribution
+torque_samples = data.torque
+
+plt.figure()
+plt.scatter(torque_samples[:, 0], torque_samples[:, 1])
+plt.title("Torque samples")
+plt.xlabel("T1 [Nm]")
+plt.ylabel("T2 [Nm]")
+plt.axis("equal")
+plt.savefig("figures/samples_torques.png")
