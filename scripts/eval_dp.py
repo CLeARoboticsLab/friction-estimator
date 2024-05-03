@@ -35,6 +35,11 @@ add_corrected_trajectory = True
 # -----------------------
 # ----- Load model ------
 # -----------------------
+network = networks.MLP(
+        layer_sizes=([hidden_layer_dim] * hidden_layer_num + [output_size])
+    )
+dummy_params = network.init(jax.random.PRNGKey(seed), jp.zeros((input_size)))
+loaded_params = dummy_params
 if add_corrected_trajectory:
     print("Loading model...")
     start_time = time.time()
@@ -42,10 +47,6 @@ if add_corrected_trajectory:
     with open('data/model_params.bin', 'rb') as f:
         bytes_input = f.read()
 
-    network = networks.MLP(
-        layer_sizes=([hidden_layer_dim] * hidden_layer_num + [output_size])
-    )
-    dummy_params = network.init(jax.random.PRNGKey(seed), jp.zeros((input_size)))
     loaded_params = serialization.from_bytes(dummy_params, bytes_input)
 
     print(f"Model loaded. Time taken: {time.time() - start_time}")
@@ -244,12 +245,28 @@ axs[2, 1].set_ylabel("zd [m/s]")
 # Error
 axs[3, 0].plot(x_error_nf, label="NF")
 axs[3, 0].plot(x_error_yf, label="YF")
+axs[3, 0].hlines(
+    y=0.0,
+    xmin=0,
+    xmax=len(x_nf),
+    colors="r",
+    linestyles="dotted",
+    label="Reference",
+)
 axs[3, 0].set_ylabel("Pos. error [m]")
 axs[3, 0].set_xlabel("Steps")
 axs[3, 0].set_ylim(bottom=0 - margin)
 
 axs[3, 1].plot(xd_error_nf, label="NF")
 axs[3, 1].plot(xd_error_yf, label="YF")
+axs[3, 1].hlines(
+    y=0.0,
+    xmin=0,
+    xmax=len(x_nf),
+    colors="r",
+    linestyles="dotted",
+    label="Reference",
+)
 axs[3, 1].set_ylabel("Vel. error [m/s]")
 axs[3, 1].set_xlabel("Steps")
 axs[3, 1].set_ylim(bottom=0 - margin)
