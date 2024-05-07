@@ -87,18 +87,49 @@ def _init_training_state(
     return training_state
 
 
-# Normalization wrapper
+# Normalization utils
 # Normalizes inputs so they're all within the range [0, 1]
 # Note that the first 2 elements of the input are the joint angles and will be normalized differently
-def normalize_joint_state(joint_state):
-    normalization_factors = jp.concatenate(
-        (
-            jp.tile(2 * env_brax.q_max, (num_joints,)),
-            jp.tile(2 * env_brax.qd_max, (num_joints,)),
-        )
+
+# Normalization parameters
+# Joint means and standard deviations
+# A mean and std dev for each joint angle and joint velocity
+
+@flax.struct.dataclass
+class NormalizationParameters:
+    translation: jp.ndarray
+    scaling: jp.ndarray
+
+
+def compute_norm_params(data):
+    joint_pos = jp.concatenate(
+        [
+            jax.vmap(lambda state: state[0:num_joints])(data.init_state.obs),
+        ]
     )
+    joint_vel = jp.concatenate(
+        [
+            jax.vmap(lambda state: state[num_joints:])(data.init_state.obs),
+        ]
+    )
+    joint_pos_mean = jp.mean(joint_pos, axis=0)
+    joint_pos_std = jp.std(joint_pos, axis=0)
+    joint_vel_mean = jp.mean(joint_vel, axis=0)
+    joint_vel_std = jp.std(joint_vel, axis=0)  
+
+    return NormalizationParameters(
+        translation=jp.concatenate([joint_pos_mean, joint_vel_mean]),
+        scaling=jp.concatenate([joint_pos_std, joint_vel_std]),
+    )
+
+
+norm_params = compute_norm_params(data)
+
+
+def normalize_joint_state(joint_state):
     return jax.tree_util.tree_map(
-        lambda state: state / normalization_factors + 0.5, joint_state
+        lambda state: (state - norm_params.translation) / norm_params.scaling,
+        joint_state,
     )
 
 
