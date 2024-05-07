@@ -50,7 +50,7 @@ seed = 0
 
 # Setup Brax environment
 env_brax = DoublePendulum()
-env_step_jitted = jax.jit(env_brax.step_directly)
+env_step_jitted = jax.jit(env_brax.step_directly_with_friction)
 
 # Define the network
 network = networks.MLP(
