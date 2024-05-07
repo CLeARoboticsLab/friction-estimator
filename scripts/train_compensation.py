@@ -19,6 +19,10 @@ from flax import serialization
 # config.update("jax_enable_x64", True)
 
 
+# ----------------------------
+# --- Load data --------------
+# ----------------------------
+
 # Define the data class
 @flax.struct.dataclass
 class MyData:
@@ -39,18 +43,28 @@ num_joints = 2
 batch_size = 256
 data_length = data.torque.shape[0]
 test_length = 1024
-num_epochs = 200
+num_epochs = 1000
 learning_rate = 1e-3
 log_interval = 10
 input_size = num_joints * 2
 hidden_layer_dim = 256
-hidden_layer_num = 2
+hidden_layer_num = 3
 output_size = num_joints
 seed = 0
+
+
+# ----------------------------
+# --- Brax -------------------
+# ----------------------------
 
 # Setup Brax environment
 env_brax = DoublePendulum()
 env_step_jitted = jax.jit(env_brax.step_directly_with_friction)
+
+
+# ----------------------------
+# --- Network ----------------
+# ----------------------------
 
 # Define the network
 network = networks.MLP(
@@ -85,6 +99,11 @@ def _init_training_state(
     )
 
     return training_state
+
+
+# ----------------------------
+# --- Normalization ----------
+# ----------------------------
 
 
 # Normalization utils
@@ -137,6 +156,10 @@ def compute_friction_torques(params, obs):
     obs = normalize_joint_state(obs)
     return network.apply(params, obs)
 
+
+# ----------------------------
+# --- Training ---------------
+# ----------------------------
 
 # Loss function
 def loss_fn(params, data):
@@ -257,6 +280,11 @@ for epoch in range(num_epochs):
     )
 print(f"Training finished. Time taken: {time.time() - start_time}")
 
+
+# ----------------------------
+# --- Plotting ---------------
+# ----------------------------
+
 # Plot validation and training loss in the same plot
 plt.figure()
 plt.plot(losses[1:], label="Training Loss")
@@ -274,7 +302,16 @@ plt.title(
 )
 plt.savefig("figures/training_and_evaluation_loss.png")
 
+# ----------------------------
+# --- Save model -------------
+# ----------------------------
+
 # Save model
 bytes_output = serialization.to_bytes(training_state.params)
 with open('data/model_params.bin', 'wb') as f:
+    f.write(bytes_output)
+
+# Save normalization parameters
+bytes_output = serialization.to_bytes(norm_params)
+with open('data/norm_params.bin', 'wb') as f:
     f.write(bytes_output)
