@@ -41,12 +41,22 @@ class DoublePendulumUtils:
         z = jp.cos(joint1_angle) + jp.cos(joint1_angle + joint2_angle)
 
         return jp.array([x, y, z])
-    
+
     @staticmethod
     def end_effector_velocity(q: jp.ndarray, qd: jp.ndarray) -> jp.ndarray:
         """Returns the y, z velocity of the end effector in the global frame.
         Assumes length of 1m for both links as defines in the urdf file"""
         return jp.matmul(DoublePendulumUtils.compute_jacobian(q)[0:3], qd)
+
+    @staticmethod
+    def end_effector_state(q: jp.ndarray, qd: jp.ndarray) -> jp.ndarray:
+        """Returns the end effector state in the global frame."""
+        return jp.concatenate(
+            [
+                DoublePendulumUtils.end_effector_position(q),
+                DoublePendulumUtils.end_effector_velocity(q, qd),
+            ]
+        )
 
     @staticmethod
     def compute_jacobian(q: jp.ndarray) -> jp.ndarray:
