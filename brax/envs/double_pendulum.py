@@ -64,8 +64,6 @@ class DoublePendulum(PipelineEnv):
         self._action_weights = jp.array([1.0, 1.0, 1.0, 1.0])
         self._normalize_reward = normalize_reward
 
-        
-
     def reset(self, rng: jp.ndarray) -> State:
         """Resets the environment to an initial state."""
         rng, rng1, rng2 = jax.random.split(rng, 3)
@@ -154,6 +152,33 @@ class DoublePendulum(PipelineEnv):
 
         # take an environment step with low level control
         pipeline_state = self.pipeline_step(state.pipeline_state, u)
+
+        # get new observations
+        obs = self._get_obs(pipeline_state)
+
+        # compute reward
+        reward, _ = self.compute_reward(obs, prev_obs, u, action)
+
+        # compute dones for resets; here we never reset
+        done = jp.zeros_like(reward)
+
+        return state.replace(
+            pipeline_state=pipeline_state, obs=obs, reward=reward, done=done
+        )
+    
+    def step_directly_with_friction(self, state: State, action: jp.ndarray) -> State:
+        """Bypass controller. Actions assumed to be torques"""
+        # translate state to observations
+        prev_obs = self._get_obs(state.pipeline_state)
+
+        # Assume action is torque
+        u = action
+
+        # Add friction
+        friction = self.calculate_friction(state, u)
+
+        # take an environment step with low level control
+        pipeline_state = self.pipeline_step(state.pipeline_state, u + friction)
 
         # get new observations
         obs = self._get_obs(pipeline_state)
