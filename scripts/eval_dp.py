@@ -66,7 +66,7 @@ if add_corrected_trajectory:
 
     loaded_params = serialization.from_bytes(dummy_params, bytes_input)
 
-    print(f"Model loaded. Time taken: {time.time() - start_time}")
+    print(f"Done. Time taken: {time.time() - start_time}")
 
     print("Loading parameters...")
     start_time = time.time()
@@ -77,7 +77,7 @@ if add_corrected_trajectory:
     # with open("brax/scripts/data/norm_params.pkl", "rb") as f:
     #     norm_params = pickle.load(f)
 
-    print(f"Parameters loaded. Time taken: {time.time() - start_time}")
+    print(f"Done. Time taken: {time.time() - start_time}")
 
 
 # Run model
@@ -214,8 +214,7 @@ _, trajectory_cf = jax.lax.scan(
     trajectory_step_cf, state_cf, (), steps
 )
 
-print("Trajectory generated.")
-print(f"Time taken: {time.time() - start_time}")
+print(f"Done. Time taken: {time.time() - start_time}")
 
 
 # -----------------------
