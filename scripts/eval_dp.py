@@ -1,6 +1,7 @@
 import jax
 import flax
 import time
+import pickle
 from brax.training import networks
 from brax.envs.double_pendulum import DoublePendulum
 from brax.robots.double_pendulum.utils import DoublePendulumUtils
@@ -21,25 +22,38 @@ qd_init = jp.array([0.0, 0.0])
 steps = 1000
 action = jp.array([0.0, 1.0, 1.0])  # position control only
 plot_start = 0
+num_joints = 2
 
 # Neural network parameters
-hidden_layer_dim = 64
-hidden_layer_num = 2
+hidden_layer_dim = 256
+hidden_layer_num = 3
 seed = 0
-input_size = 2 * q_init.shape[0]
-output_size = input_size // 2
-
+input_size = 2 * num_joints
+output_size = num_joints
 add_corrected_trajectory = True
 
 
 # -----------------------
 # ----- Load model ------
 # -----------------------
+
+# Load model and params
 network = networks.MLP(
         layer_sizes=([hidden_layer_dim] * hidden_layer_num + [output_size])
     )
 dummy_params = network.init(jax.random.PRNGKey(seed), jp.zeros((input_size)))
 loaded_params = dummy_params
+
+
+@flax.struct.dataclass
+class NormalizationParameters:
+    translation: jp.ndarray
+    scaling: jp.ndarray
+
+
+norm_params = NormalizationParameters(
+    translation=jp.zeros(input_size), scaling=jp.ones(input_size)
+)
 if add_corrected_trajectory:
     print("Loading model...")
     start_time = time.time()
@@ -47,9 +61,36 @@ if add_corrected_trajectory:
     with open('data/model_params.bin', 'rb') as f:
         bytes_input = f.read()
 
+    # with open('brax/scripts/data/model_params.bin', 'rb') as f:
+    #     bytes_input = f.read()
+
     loaded_params = serialization.from_bytes(dummy_params, bytes_input)
 
     print(f"Model loaded. Time taken: {time.time() - start_time}")
+
+    print("Loading parameters...")
+    start_time = time.time()
+
+    with open("data/norm_params.pkl", "rb") as f:
+        norm_params = pickle.load(f)
+
+    # with open("brax/scripts/data/norm_params.pkl", "rb") as f:
+    #     norm_params = pickle.load(f)
+
+    print(f"Parameters loaded. Time taken: {time.time() - start_time}")
+
+
+# Run model
+def normalize_joint_state(joint_state):
+    return jax.tree_util.tree_map(
+        lambda state: (state - norm_params.translation) / norm_params.scaling,
+        joint_state,
+    )
+
+
+def compute_friction_torques(params, obs):
+    obs = normalize_joint_state(obs)
+    return network.apply(params, obs)
 
 
 # -----------------------
@@ -79,6 +120,7 @@ class MyData:
     xd: jp.ndarray
     x_error: jp.float32
     xd_error: jp.float32
+    control_torque: jp.ndarray = jp.zeros(num_joints)
 
 
 def make_trajectory_step(action, step_fn):
@@ -93,8 +135,18 @@ def make_trajectory_step(action, step_fn):
         x_error = jp.linalg.norm(x - action)
         xd_error = jp.linalg.norm(xd)
         new_state = step_fn(init_state, action)
+        control_torque = env_cf.osc_control(
+            action, init_state.obs
+        )  # only for plotting purposes. Not used in simulation.
         return new_state, MyData(
-            init_state, new_state, action, x, xd, x_error, xd_error
+            init_state,
+            new_state,
+            action,
+            x,
+            xd,
+            x_error,
+            xd_error,
+            control_torque,
         )
 
     return trajectory_step
@@ -112,10 +164,22 @@ def make_cf_trajectory_step(action, step_fn, params):
         x_error = jp.linalg.norm(x - action)
         xd_error = jp.linalg.norm(xd)
         control_torque = env_cf.osc_control(action, init_state.obs)
-        friction_correction = network.apply(params, init_state.obs)
-        new_state = step_fn(init_state, control_torque + friction_correction)
+        friction = env_cf.calculate_friction(init_state)
+        friction_correction = compute_friction_torques(
+            params, init_state.obs
+        )  # i/o both (batch_size, num_joints)
+        new_state = step_fn(
+            init_state, control_torque + friction + friction_correction
+        )
         return new_state, MyData(
-            init_state, new_state, action, x, xd, x_error, xd_error
+            init_state,
+            new_state,
+            action,
+            x,
+            xd,
+            x_error,
+            xd_error,
+            control_torque,
         )
     return trajectory_step
 
@@ -272,7 +336,7 @@ axs[3, 1].set_xlabel("Steps")
 axs[3, 1].set_ylim(bottom=0 - margin)
 
 # Add corrected trajectory
-if add_corrected_trajectory: 
+if add_corrected_trajectory:
     x_cf = trajectory_cf.x
     xd_cf = trajectory_cf.xd
     x_error_cf = trajectory_cf.x_error
@@ -316,3 +380,43 @@ axs[4, 1].axis("off")
 
 plt.tight_layout()
 plt.savefig("figures/double_pend.png")
+
+
+# Plot friction correction torques
+if add_corrected_trajectory:
+    friction_correction = compute_friction_torques(
+        loaded_params, trajectory_cf.init_state.obs
+    )
+    fig, axs = plt.subplots(1, 2, figsize=(7.5, 3.75))
+    fig.suptitle("Friction Correction Torques")
+    axs[0].plot(friction_correction[:, 0], label="Joint 1")
+    axs[0].set_ylabel("Torque [Nm]")
+    axs[0].set_xlabel("Steps")
+    axs[0].set_title("Joint 1")
+    axs[1].plot(friction_correction[:, 1], label="Joint 2")
+    axs[1].set_ylabel("Torque [Nm]")
+    axs[1].set_xlabel("Steps")
+    axs[1].set_title("Joint 2")
+    plt.tight_layout()
+    plt.savefig("figures/friction_correction.png")
+
+
+# Plot friction and control torques for the trajectory with friction
+# One subplot for each joint
+fig, axs = plt.subplots(1, 2, figsize=(7.5, 3.75))
+fig.suptitle("Friction Torques")
+friction = env_yf.calculate_friction(trajectory_yf.init_state)
+control_torque = trajectory_yf.control_torque
+axs[0].plot(control_torque[:, 0], label="Control")
+axs[0].plot(friction[:, 0], label="Friction")
+axs[0].set_ylabel("Torque [Nm]")
+axs[0].set_xlabel("Steps")
+axs[0].set_title("Joint 1")
+axs[1].plot(control_torque[:, 1], label="Control")
+axs[1].plot(friction[:, 1], label="Friction")
+axs[1].set_ylabel("Torque [Nm]")
+axs[1].set_xlabel("Steps")
+axs[1].set_title("Joint 2")
+plt.legend()
+plt.tight_layout()
+plt.savefig("figures/control_and_friction.png")
