@@ -157,6 +157,11 @@ def compute_friction_torques(params, obs):
     return network.apply(params, obs)
 
 
+# Save
+with open("data/norm_params.pkl", "wb") as f:
+    pickle.dump(norm_params, f)
+
+
 # ----------------------------
 # --- Training ---------------
 # ----------------------------
@@ -281,6 +286,12 @@ for epoch in range(num_epochs):
 print(f"Training finished. Time taken: {time.time() - start_time}")
 
 
+# Save model
+bytes_output = serialization.to_bytes(training_state.params)
+with open('data/model_params.bin', 'wb') as f:
+    f.write(bytes_output)
+
+
 # ----------------------------
 # --- Plotting ---------------
 # ----------------------------
@@ -301,17 +312,3 @@ plt.title(
     f"Layer Dims: {hidden_layer_dim}"
 )
 plt.savefig("figures/training_and_evaluation_loss.png")
-
-# ----------------------------
-# --- Save model -------------
-# ----------------------------
-
-# Save model
-bytes_output = serialization.to_bytes(training_state.params)
-with open('data/model_params.bin', 'wb') as f:
-    f.write(bytes_output)
-
-# Save normalization parameters
-bytes_output = serialization.to_bytes(norm_params)
-with open('data/norm_params.bin', 'wb') as f:
-    f.write(bytes_output)
