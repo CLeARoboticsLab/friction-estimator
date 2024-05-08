@@ -21,7 +21,7 @@ import matplotlib.pyplot as plt
 # -----------------------
 
 # Collection limits
-num_steps = 2**18
+num_steps = 2**16
 torque_logging_interval = 100
 num_joints = 2
 link_length = 1.0
@@ -88,7 +88,7 @@ def make_data(key):
             )
 
     # Calculate friction
-    friction = env.calculate_friction(init_state, torque)
+    friction = env.calculate_friction(init_state)
 
     # Step in both environments
     next_state = step_jitted(init_state, torque + friction)
