@@ -201,7 +201,7 @@ state_yf = set_yf_jitted(q_init, qd_init)
 state_cf = set_cf_jitted(q_init, qd_init)
 
 # Run the simulation
-print("Generating trajectory")
+print("Generating trajectory...")
 start_time = time.time()
 
 _, trajectory_nf = jax.lax.scan(
