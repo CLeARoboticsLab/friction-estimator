@@ -34,9 +34,11 @@ class DoublePendulum(PipelineEnv):
         self._K_d = 1.0 * jp.ones(3)
 
         # Friction parameters
-        self.friction_torque_coeff = 1.0
-        self.friction_threshold = 0.1
-        self.friction_static = 30.0
+        # Liming Gao, 2017
+        self.fv = 288.28
+        self.fc = 58.47
+        self.qdv = 90.17
+        self.Kt = 0.0075  # Ours
 
         # Feasible space for joint space
         # Same for both joints
@@ -55,7 +57,7 @@ class DoublePendulum(PipelineEnv):
         # feedback gains for the low-level controller
         self._K = jp.array([[64., 17., 25., 9.],
                             [17., 30., 9., 8.]])
-        
+
         # uncorrected setpoint for q1, q2, q1d, q2d (pendulum is straight up)
         self._setpoint = jp.array([0.0, 0.0, 0.0, 0.0])
 
@@ -123,7 +125,7 @@ class DoublePendulum(PipelineEnv):
         u = self.osc_control(action, prev_obs)
 
         # Add friction
-        friction = self.calculate_friction(state, u)
+        friction = self.calculate_friction(state)
 
         # take an environment step with low level control
         pipeline_state = self.pipeline_step(state.pipeline_state, u + friction)
@@ -141,7 +143,7 @@ class DoublePendulum(PipelineEnv):
         return state.replace(
             pipeline_state=pipeline_state, obs=obs, reward=reward, done=done
         )
-      
+
     def step_directly(self, state: State, action: jp.ndarray) -> State:
         """Bypass controller. Actions assumed to be torques"""
         # translate state to observations
@@ -165,7 +167,7 @@ class DoublePendulum(PipelineEnv):
         return state.replace(
             pipeline_state=pipeline_state, obs=obs, reward=reward, done=done
         )
-    
+
     def step_directly_with_friction(self, state: State, action: jp.ndarray) -> State:
         """Bypass controller. Actions assumed to be torques"""
         # translate state to observations
@@ -175,7 +177,7 @@ class DoublePendulum(PipelineEnv):
         u = action
 
         # Add friction
-        friction = self.calculate_friction(state, u)
+        friction = self.calculate_friction(state)
 
         # take an environment step with low level control
         pipeline_state = self.pipeline_step(state.pipeline_state, u + friction)
@@ -193,13 +195,14 @@ class DoublePendulum(PipelineEnv):
             pipeline_state=pipeline_state, obs=obs, reward=reward, done=done
         )
 
-    def calculate_friction(self, state: State, u: jp.ndarray) -> jp.ndarray:
+    def calculate_friction(self, state: State) -> jp.ndarray:
+        # Liming Gao, 2017
         qd = state.pipeline_state.qd
-        t = (qd, u)
-        return jp.where(
-            jp.abs(t[0]) < 2.0,
-            -jp.sign(qd) * t[1],
-            0.0
+        qd = qd * 180 / jp.pi
+        return (
+            self.Kt
+            * jp.sign(qd)
+            * (self.fc + self.fv * (1 - jp.exp(-(jp.abs(qd / self.qdv)))))
         )
 
     def approx_dynamics(self, obs: jp.ndarray, u: jp.ndarray,
