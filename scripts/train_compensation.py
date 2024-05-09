@@ -12,7 +12,6 @@ from brax.envs import State
 from brax.envs.double_pendulum import DoublePendulum
 from jax import numpy as jp
 from jax.config import config
-from flax import serialization
 
 # Debugging utilities
 # jax.config.update("jax_disable_jit", True)
