@@ -43,8 +43,7 @@ env = DoublePendulum()  # 2D double pendulum rotating around x-axis
 step_jitted = jax.jit(env.step_directly)
 reset_jitted = jax.jit(env.reset)
 
-print("Brax environment loaded.")
-print(f"Time taken: {time.time() - start_time}")
+print(f"Done. Time taken: {time.time() - start_time}")
 
 
 # ----------------------------
@@ -109,12 +108,16 @@ key = jax.random.key(seed)
 key_states = jax.random.split(key, num=num_steps)
 data = jax.vmap(make_data)(key_states)
 
-print("Data collection loop finished.")
-print(f"Time taken: {time.time() - start_time}"),
+print(f"Done. Time taken: {time.time() - start_time}"),
 
 # Save data
+print("Saving data...")
+start_time = time.time()
+
 with open("data/data.pkl", "wb") as f:
     pickle.dump(data, f)
+
+print(f"Done. Time taken: {time.time() - start_time}")
 
 # ----------------------------
 # --- Plot data  -------------
