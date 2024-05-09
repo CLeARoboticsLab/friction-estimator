@@ -8,7 +8,6 @@ from brax.robots.double_pendulum.utils import DoublePendulumUtils
 from jax import numpy as jp
 import matplotlib.pyplot as plt
 from brax.envs import State
-from flax import serialization
 
 # jax.config.update("jax_disable_jit", True)
 
@@ -58,13 +57,11 @@ if add_corrected_trajectory:
     print("Loading model...")
     start_time = time.time()
 
-    with open('data/model_params.bin', 'rb') as f:
-        bytes_input = f.read()
+    with open("data/model_params.pkl", "rb") as f:
+        loaded_params = pickle.load(f)
 
-    # with open('brax/scripts/data/model_params.bin', 'rb') as f:
-    #     bytes_input = f.read()
-
-    loaded_params = serialization.from_bytes(dummy_params, bytes_input)
+    # with open('brax/scripts/data/model_params.pkl', 'rb') as f:
+    #     loaded_params = pickle.load(f)
 
     print(f"Done. Time taken: {time.time() - start_time}")
 
