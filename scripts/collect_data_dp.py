@@ -40,7 +40,7 @@ start_time = time.time()
 
 # Setup Brax environment
 env = DoublePendulum()  # 2D double pendulum rotating around x-axis
-step_jitted = jax.jit(env.step_directly_with_friction)
+step_jitted = jax.jit(env.step_directly)
 reset_jitted = jax.jit(env.reset)
 
 print("Brax environment loaded.")
