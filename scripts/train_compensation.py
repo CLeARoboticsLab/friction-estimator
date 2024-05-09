@@ -59,7 +59,7 @@ seed = 0
 
 # Setup Brax environment
 env_brax = DoublePendulum()
-env_step_jitted = jax.jit(env_brax.step_directly_with_friction)
+env_step_jitted = jax.jit(env_brax.step_directly)
 
 
 # ----------------------------
@@ -170,13 +170,13 @@ with open("data/norm_params.pkl", "wb") as f:
 def loss_fn(params, data):
 
     # Compute the friction torques
-    torques_friction = compute_friction_torques(
+    correction = compute_friction_torques(
         params, data.init_state.obs
     )  # i/o both (batch_size, num_joints)
 
     # Compute the next state
     next_state = jax.vmap(env_step_jitted)(
-        data.init_state, data.torque + torques_friction
+        data.init_state, data.torque + correction
     )
 
     return jp.mean((next_state.obs - data.next_state.obs) ** 2)
@@ -231,13 +231,13 @@ data_test = jax.tree_util.tree_map(
 def eval_loss_fn(params, data):
 
     # Compute the friction torques
-    torques_friction = compute_friction_torques(
+    correction = compute_friction_torques(
         params, data.init_state.obs
     )  # i/o both (batch_size, num_joints)
 
     # Compute the next state
     next_state = jax.vmap(env_step_jitted)(
-        data.init_state, data.torque + torques_friction
+        data.init_state, data.torque + correction
     )
 
     return jp.mean((next_state.obs - data.next_state.obs) ** 2)
