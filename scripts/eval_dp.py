@@ -38,7 +38,8 @@ add_corrected_trajectory = True
 
 # Load model and params
 network = networks.MLP(
-        layer_sizes=([hidden_layer_dim] * hidden_layer_num + [output_size])
+        layer_sizes=([hidden_layer_dim] * hidden_layer_num + [output_size]),
+        activation=flax.linen.gelu
     )
 dummy_params = network.init(jax.random.PRNGKey(seed), jp.zeros((input_size)))
 loaded_params = dummy_params
