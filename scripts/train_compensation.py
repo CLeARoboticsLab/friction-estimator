@@ -287,9 +287,8 @@ print(f"Training finished. Time taken: {time.time() - start_time}")
 
 
 # Save model
-bytes_output = serialization.to_bytes(training_state.params)
-with open('data/model_params.bin', 'wb') as f:
-    f.write(bytes_output)
+with open("data/model_params.pkl", "wb") as f:
+    pickle.dump(training_state.params, f)
 
 
 # ----------------------------
