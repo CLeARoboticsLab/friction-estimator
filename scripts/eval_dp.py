@@ -167,7 +167,7 @@ def make_cf_trajectory_step(action, step_fn, params):
             params, init_state.obs
         )  # i/o both (batch_size, num_joints)
         new_state = step_fn(
-            init_state, control_torque + friction + friction_correction
+            init_state, control_torque + friction - friction_correction
         )
         return new_state, MyData(
             init_state,
