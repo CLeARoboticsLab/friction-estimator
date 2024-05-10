@@ -47,7 +47,7 @@ learning_rate = 1e-3
 log_interval = 10
 input_size = num_joints * 2
 hidden_layer_dim = 256
-hidden_layer_num = 3
+hidden_layer_num = 4
 output_size = num_joints
 seed = 0
 

@@ -25,7 +25,7 @@ num_joints = 2
 
 # Neural network parameters
 hidden_layer_dim = 256
-hidden_layer_num = 3
+hidden_layer_num = 4
 seed = 0
 input_size = 2 * num_joints
 output_size = num_joints
