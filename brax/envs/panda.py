@@ -11,9 +11,6 @@ class Panda(PipelineEnv):
     def __init__(
         self,
         theta_des=jp.pi / 4.0,
-        action_scale=1.0,
-        initial_theta_range=(-jp.pi, jp.pi),
-        initial_thetadot_range=(-0.1, 0.1),
         backend="generalized",
         **kwargs
     ):
@@ -22,7 +19,7 @@ class Panda(PipelineEnv):
         sys = PandaUtils.get_system()
 
         # set the time step duration for the physics pipeline
-        sys = sys.replace(dt=0.002)
+        sys = sys.replace(dt=0.01)
 
         # the number of times to step the physics pipeline for each
         # environment step
@@ -30,27 +27,40 @@ class Panda(PipelineEnv):
 
         super().__init__(sys=sys, backend=backend, n_frames=n_frames, **kwargs)
 
-        # parameters for the system
-        self._theta_des = theta_des
-        self._initial_theta_range = initial_theta_range
-        self._initial_thetadot_range = initial_thetadot_range
-        self._action_scale = action_scale
+        # Friction parameters
+        # Liming Gao, 2017
+        self.fv = 288.28
+        self.fc = 58.47
+        self.qdv = 90.17
+        self.Kt = 0.0075  # Ours
+
+        # TODO: Get this directly from mujoco xml
+        self.q_max = jp.array(
+            [2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973]
+        )
+        self.q_min = jp.array(
+            [-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973]
+        )
+        self.qd_max = jp.array(
+            [2.1750, 2.1750, 2.1750, 2.1750, 2.6100, 2.6100, 2.6100]
+        )
+        self.qd_min = -self.qd_max
 
     def reset(self, rng: jp.ndarray) -> State:
         """Resets the environment to a random initial state."""
         rng1, rng2 = jax.random.split(rng, 2)
 
-        q = self.sys.init_q + jax.random.uniform(
+        q = jax.random.uniform(
             rng1,
-            (self.sys.q_size(),),
-            minval=self._initial_theta_range[0],
-            maxval=self._initial_theta_range[1],
+            (7,),
+            minval=self.q_min,
+            maxval=self.q_max,
         )
         qd = jax.random.uniform(
             rng2,
-            (self.sys.qd_size(),),
-            minval=self._initial_thetadot_range[0],
-            maxval=self._initial_thetadot_range[1],
+            (7,),
+            minval=self.qd_min,
+            maxval=self.qd_max,
         )
         pipeline_state = self.pipeline_init(q, qd)
         obs = self._get_obs(pipeline_state)
@@ -75,7 +85,7 @@ class Panda(PipelineEnv):
         prev_obs = self._get_obs(state.pipeline_state)
 
         # open loop control
-        u = action * self._action_scale
+        u = action
 
         # take an environment step with low level control
         new_pipeline_state = self.pipeline_step(state.pipeline_state, u)
@@ -96,6 +106,33 @@ class Panda(PipelineEnv):
             done=done,
         )
 
+    def step_directly(self, state: State, action: jp.ndarray) -> State:
+        """Steps the environment forward given an action. Action is a torque for every joint."""
+
+        # open loop control
+        u = action
+
+        # take an environment step with low level control
+        new_pipeline_state = self.pipeline_step(state.pipeline_state, u)
+
+        # get new observations
+        obs = self._get_obs(new_pipeline_state)
+
+        return state.replace(
+            pipeline_state=new_pipeline_state,
+            obs=obs,
+        )
+
+    def calculate_friction(self, state: State) -> jp.ndarray:
+        # Liming Gao, 2017
+        qd = state.pipeline_state.qd
+        qd = qd * 180 / jp.pi
+        return (
+            self.Kt
+            * jp.sign(qd)
+            * (self.fc + self.fv * (1 - jp.exp(-(jp.abs(qd / self.qdv)))))
+        )
+
     def _get_obs(self, pipeline_state: base.State) -> jp.ndarray:
         """Observations: q; qd"""
         return jp.concatenate([pipeline_state.q, pipeline_state.qd])
@@ -110,4 +147,4 @@ class Panda(PipelineEnv):
     @property
     def action_size(self):
         """Action is open loop torque input"""
-        return self.sys.act_size()
+        return self.sys.act_size()#
