@@ -1,6 +1,10 @@
 <mujoco model="panda nohand">
   <compiler angle="radian" meshdir="assets" autolimits="true"/>
 
+  <option iterations="1" ls_iterations="5">
+    <flag eulerdamp="disable"/>
+  </option>
+
   <actuator>
       <!-- Physical limits of the actuator. -->
       <motor ctrllimited="true" ctrlrange="-80.0 80.0" joint="joint1" name="torq_j1"/>
