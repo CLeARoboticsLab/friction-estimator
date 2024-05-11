@@ -21,8 +21,8 @@ import matplotlib.pyplot as plt
 # -----------------------
 
 # Collection limits
-batch_size = 64
-num_batches = 500
+batch_size = 32
+num_batches = 2
 torque_logging_interval = 100
 num_joints = 7
 seed = 0
@@ -89,10 +89,10 @@ def make_data(key):
     next_state = step_jitted(init_state, torque + friction)
 
     return MyData(
-        init_state,
-        torque,
-        friction,
-        next_state,
+        init_state=init_state.obs,
+        torque=torque,
+        friction=friction,
+        next_state=next_state.obs,
     )
 
 
